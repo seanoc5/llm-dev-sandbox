@@ -16,7 +16,7 @@ A persistent, local-first sandbox for running LLM agents like **Claude Code**, *
 1. **Clone the repo**:
    ```bash
    git clone <your-repo-url>
-   cd llm-sandbox-dist
+   cd llm-dev-sandbox
    ```
 
 2. **Build the image** (once, and after any Dockerfile changes):
