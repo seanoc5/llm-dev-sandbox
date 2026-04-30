@@ -167,7 +167,6 @@ docker run "${INTERACTIVE_FLAGS[@]}" --rm --init \
     --network host \
     --user "$(id -u):$(id -g)" \
     --workdir "$PROJECT_DIR" \
-    --entrypoint "" \
     "${ENV_FILE_OPT[@]}" \
     "${GH_TOKEN_OPTS[@]}" \
     "${DOCKER_SOCK_OPTS[@]}" \
