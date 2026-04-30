@@ -1,14 +1,23 @@
-FROM ubuntu:24.04
+FROM buildpack-deps:noble
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Core tools
+# buildpack-deps:noble already provides:
+#   build-essential, curl, wget, git, ca-certificates, gnupg, and a large set of dev libs.
+#
+# ubuntu-standard fills in the Linux userland (man pages, common utilities, etc.).
+# Intentionally NO --no-install-recommends here — the recommended packages are the point.
+RUN apt-get update \
+    && apt-get install -y ubuntu-standard \
+    && rm -rf /var/lib/apt/lists/*
+
+# Tools not covered by buildpack-deps or ubuntu-standard
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl wget jq ripgrep fd-find unzip zip sudo \
-    openssh-client gnupg ca-certificates \
-    build-essential \
+    jq ripgrep fd-find unzip zip sudo \
+    openssh-client \
     postgresql-client \
-    iputils-ping \
+    vim tree htop \
+    iproute2 net-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # JDK 21
@@ -24,7 +33,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # Deno
 RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
 
-# Python 3 + uv
+# Python 3 + uv (python3 may already be present; uv is not)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-venv \
     && rm -rf /var/lib/apt/lists/*
@@ -75,4 +84,3 @@ RUN mkdir -p /home/sandbox/.npm /home/sandbox/.cache/pip /home/sandbox/.cache/uv
 USER sandbox
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-
