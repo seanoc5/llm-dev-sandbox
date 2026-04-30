@@ -36,9 +36,11 @@ touch "$HOME/.claude.json"
 # --- Mount strategy ---
 # Maps host configs into the container's standard home (/home/sandbox)
 MOUNTS=(
-    -v "$PROJECT_DIR:/workspace:rw"
+    -v "$PROJECT_DIR:$PROJECT_DIR:rw"
     -v "$HOME/.claude:/home/sandbox/.claude:rw"
     -v "$HOME/.claude.json:/home/sandbox/.claude.json:rw"
+    -v "$HOME/.ssh:$HOME/.ssh:ro"
+    -v "$HOME/.ssh:/home/sandbox/.ssh:ro"
     -v "$HOME/.gitconfig:/home/sandbox/.gitconfig:ro"
     -v "$HOME/.config/gh:/home/sandbox/.config/gh:ro"
     -v "$HOME/.bash_history_sandbox:/home/sandbox/.bash_history:rw"
@@ -49,7 +51,83 @@ MOUNTS=(
 # Allow for additional mounts via environment variable
 if [ -n "${EXTRA_MOUNTS:-}" ]; then
     IFS=',' read -ra ADDR <<< "$EXTRA_MOUNTS"
-    for mount in "${ADDR[@]}"; do MOUNTS+=("-v" "$mount"); done
+    for mount_spec in "${ADDR[@]}"; do
+        # Trim leading/trailing whitespace
+        shopt -s extglob
+        mount_spec="${mount_spec##*( )}"
+        mount_spec="${mount_spec%%*( )}"
+        shopt -u extglob
+
+        # 1. Separate options (:ro, :rw)
+        options=""
+        path_spec="$mount_spec"
+        if [[ "$path_spec" == *:ro ]]; then
+            options=":ro"
+            path_spec="${path_spec%:ro}"
+        elif [[ "$path_spec" == *:rw ]]; then
+            options=":rw"
+            path_spec="${path_spec%:rw}"
+        fi
+
+        # 2. Separate host and container paths
+        host_path="$path_spec"
+        container_path=""
+        if [[ "$path_spec" == *":"* ]]; then
+            # Use non-greedy matching from the right for host_path
+            # and greedy matching from the left for container_path.
+            # This handles paths with multiple colons correctly.
+            host_path="${path_spec%:*}"
+            container_path="${path_spec##*:}"
+        fi
+
+        # 3. If container path is empty (e.g., from "host:" or just "host"),
+        #    default it to the host_path.
+        if [ -z "$container_path" ]; then
+            container_path="$host_path"
+        fi
+
+        # 4. Final validation for host_path.
+        if [ -z "$host_path" ]; then
+            echo "Error: Invalid mount specification. Host path cannot be empty in '$mount_spec'" >&2
+            exit 1
+        fi
+
+        # 5. Assemble the final, valid mount string for Docker
+        final_mount="${host_path}:${container_path}${options}"
+        MOUNTS+=("-v" "$final_mount")
+    done
+fi
+
+# Project-specific environment variables
+ENV_FILE_OPT=()
+if [ -f "$PROJECT_DIR/.sandbox-env" ]; then
+    echo "Env file:  $PROJECT_DIR/.sandbox-env"
+    ENV_FILE_OPT=(--env-file "$PROJECT_DIR/.sandbox-env")
+fi
+
+# Docker-outside-of-Docker: mount the host socket so Testcontainers and docker CLI work.
+# --group-add gives the sandbox user permission to write to the socket.
+# TESTCONTAINERS_HOST_OVERRIDE=localhost is needed with --network host so Testcontainers
+# resolves mapped ports against localhost rather than the bridge IP.
+DOCKER_SOCK_OPTS=()
+if [ -S /var/run/docker.sock ]; then
+    DOCKER_SOCK_OPTS=(
+        -v /var/run/docker.sock:/var/run/docker.sock
+        --group-add "$(stat -c '%g' /var/run/docker.sock)"
+        -e DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
+        -e TESTCONTAINERS_HOST_OVERRIDE=localhost
+    )
+fi
+
+# GitHub CLI token — gh stores the token in the system keyring on Linux, not in
+# ~/.config/gh/hosts.yml, so mounting the config dir isn't enough. Read it here
+# from the host and pass it in as GH_TOKEN so the CLI works without re-authing.
+GH_TOKEN_OPTS=()
+if command -v gh &>/dev/null; then
+    _gh_token=$(gh auth token 2>/dev/null)
+    if [ -n "$_gh_token" ]; then
+        GH_TOKEN_OPTS=(-e "GH_TOKEN=$_gh_token")
+    fi
 fi
 
 # SSH Agent Forwarding
@@ -86,12 +164,14 @@ echo "Agent:    $AGENT"
 echo "---------------------------"
 
 docker run "${INTERACTIVE_FLAGS[@]}" --rm --init \
-    --hostname "sandbox" \
+    --network host \
     --user "$(id -u):$(id -g)" \
-    --workdir "/workspace" \
-    --add-host host.docker.internal:host-gateway \
-    "${MOUNTS[@]}" \
+    --workdir "$PROJECT_DIR" \
+    "${ENV_FILE_OPT[@]}" \
+    "${GH_TOKEN_OPTS[@]}" \
+    "${DOCKER_SOCK_OPTS[@]}" \
     "${SSH_OPTS[@]}" \
+    "${MOUNTS[@]}" \
     -e "TERM=$TERM" \
     -e "COLORTERM=${COLORTERM:-}" \
     "$IMAGE" \

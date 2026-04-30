@@ -44,6 +44,24 @@ The following host directories are mapped into the container for persistence:
 
 ## Advanced Usage
 
+### Host Service Access
+
+The sandbox runs with `--network host`, so `localhost` inside the container is the same as `localhost` on your machine. Any service running on the host (Postgres, Spring Boot apps, Ollama, etc.) is reachable at `localhost:<port>` with no extra configuration.
+
+To pre-set credentials and defaults so agents don't need to pass flags explicitly, create a `.sandbox-env` file in your project directory:
+
+```bash
+# /opt/work/myproject/.sandbox-env  (gitignore this file)
+PGHOST=localhost
+PGPORT=35432
+PGDATABASE=mydb
+PGUSER=myuser
+PGPASSWORD=mypassword
+MY_APP_URL=http://localhost:18081
+```
+
+When `sandbox.sh` finds a `.sandbox-env` in the project directory it passes it to the container via `--env-file`.
+
 ### Extra Mounts
 You can provide additional read-only or read-write mounts via the `EXTRA_MOUNTS` environment variable:
 
