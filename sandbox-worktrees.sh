@@ -119,7 +119,8 @@ for wt in "${WORKTREES[@]}"; do
 
         # Optionally launch sandbox
         if [ -n "$AGENT" ]; then
-            tmux send-keys -t "$WINDOW" "$SCRIPT_DIR/sandbox.sh $wt $AGENT" Enter
+            # Run the sandbox, then rename the window when it exits
+            tmux send-keys -t "$WINDOW" "$SCRIPT_DIR/sandbox.sh $wt $AGENT; tmux rename-window '💤 $short_branch'" Enter
             echo "    -> launched sandbox ($AGENT)"
         fi
 
