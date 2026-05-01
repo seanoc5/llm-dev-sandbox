@@ -81,6 +81,10 @@ ENV PATH="/home/sandbox/.npm-global/bin:/home/sandbox/.local/bin:${PATH}"
 RUN mkdir -p /home/sandbox/.npm /home/sandbox/.cache/pip /home/sandbox/.cache/uv \
     && chown -R sandbox:sandbox /home/sandbox
 
+# Add aliases for LLM CLIs
+RUN echo "alias claude='claude --dangerously-skip-permissions'" >> /home/sandbox/.bashrc \
+    && echo "alias gemini='gemini --yolo'" >> /home/sandbox/.bashrc
+
 USER sandbox
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -100,6 +100,13 @@ for wt in "${WORKTREES[@]}"; do
     branch="$(git -C "$wt" branch --show-current 2>/dev/null || echo "detached")"
     [ -z "$branch" ] && branch="detached"
 
+    # Smart format the branch name for tmux: strip common prefixes
+    short_branch="$branch"
+    if [[ "$short_branch" == */* ]]; then
+        # Remove everything before the last slash for typical prefix/name branches
+        short_branch="${short_branch##*/}"
+    fi
+
     if $USE_TMUX; then
         echo "  Window $WINDOW: $wt_name ($branch)"
 
@@ -107,7 +114,7 @@ for wt in "${WORKTREES[@]}"; do
         if tmux list-windows -F '#{window_index}' | grep -q "^${WINDOW}$"; then
             echo "    -> window $WINDOW already exists, skipping creation"
         else
-            tmux new-window -t "$WINDOW" -n "$wt_name" -c "$wt"
+            tmux new-window -t "$WINDOW" -n "$short_branch" -c "$wt"
         fi
 
         # Optionally launch sandbox
