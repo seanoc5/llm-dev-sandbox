@@ -48,6 +48,25 @@ MOUNTS=(
     -v "$HOME/.npm:/home/sandbox/.npm:rw"
 )
 
+# --- Git Worktree Support ---
+# Git worktrees use a .git file containing an absolute path pointing to the
+# main repository's .git directory. If this directory is outside PROJECT_DIR,
+# it must be mounted for git to function inside the sandbox.
+if command -v git &>/dev/null && git -C "$PROJECT_DIR" rev-parse --git-dir &>/dev/null; then
+    # Try --path-format=absolute (git 2.31+) fallback to realpath
+    _git_common_dir="$(git -C "$PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || realpath "$(git -C "$PROJECT_DIR" rev-parse --git-common-dir)")"
+    
+    # Check if the common dir was resolved, exists, and is outside PROJECT_DIR
+    if [ -n "$_git_common_dir" ] && [ -d "$_git_common_dir" ]; then
+        # Use realpath to handle any symlinks or relative paths for strict prefix comparison
+        _proj_real="$(realpath "$PROJECT_DIR")"
+        _git_real="$(realpath "$_git_common_dir")"
+        if [[ "$_git_real" != "$_proj_real"* ]]; then
+            MOUNTS+=("-v" "$_git_real:$_git_real:rw")
+        fi
+    fi
+fi
+
 # Allow for additional mounts via environment variable
 if [ -n "${EXTRA_MOUNTS:-}" ]; then
     IFS=',' read -ra ADDR <<< "$EXTRA_MOUNTS"
