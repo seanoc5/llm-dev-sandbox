@@ -16,11 +16,11 @@ This project champions a **local-first** approach. Cloud-based sandboxes (like [
 
 As LLMs have reached 1M+ token contexts (e.g., Claude 4.7, Gemini 1.5 Pro), the industry standard for multi-agent development has shifted to **Git Worktree Isolation**. This prevents file lock contention and context pollution when running parallel agents.
 
-This sandbox supports a **Coordinator -> Worker** architecture:
+This sandbox supports a fully autonomous **Coordinator -> Worker** architecture managed via `tmux`:
 
-1.  **The Coordinator (Brain):** Runs in the main repository (e.g., using Gemini CLI). It uses `gh` to read issues, defines technical specs, and dispatches tasks to specific worktrees.
-2.  **The Workers (Hands):** Independent sandbox instances (e.g., running Claude Code) deployed in sibling git worktrees (`../wt1`, `../wt2`).
-3.  **The Communication:** The Coordinator communicates with Workers either by injecting commands directly via the mounted `tmux` socket, or by dropping `.agent-task.md` files into the worktrees for a background `worker-listener.sh` to pick up.
+1.  **The Coordinator (Brain):** A dedicated `tmux` session is bootstrapped by `llm-start.sh`, dropping you directly into Gemini CLI (Window 1). Gemini acts as an autonomous project manager. It uses `gh` to read your backlog, plans tasks, and dynamically creates Git worktrees on the fly.
+2.  **The Workers (Hands):** The Coordinator autonomously provisions background `tmux` windows containing isolated Claude Code sandboxes.
+3.  **The Communication:** The Coordinator assigns tasks by dropping highly detailed `.agent-task.md` specs into the worktrees. A background `worker-listener.sh` daemon immediately picks them up and executes them, while the Coordinator monitors their PR output via `gh`.
 
 #### Open Source Landscape & Alternatives
 
@@ -130,7 +130,22 @@ The following host paths are bind-mounted into the container:
 
 `sandbox.sh` automatically detects git worktrees. When the project directory is a worktree (its `.git` is a file pointing to the main repo), the script mounts the main repo's `.git/` directory into the container so all git operations work normally.
 
-#### Multi-worktree tmux setup
+#### Autonomous Swarm Orchestration (`llm-start.sh`)
+
+The premier way to use this sandbox is to let the AI manage the infrastructure.
+
+```bash
+# Simply navigate to your project and run the bootstrap script
+cd /opt/work/myproject
+./llm-start.sh
+```
+
+This creates a dedicated `tmux` session, opens Gemini in Window 1, injects the `COORDINATOR_SYSTEM_PROMPT.md`, and instructs Gemini to execute its "Initial Startup Checklist". Gemini will:
+1. Survey your repo and GitHub issues.
+2. Dynamically execute `git worktree add ...` and `tmux new-window -d ...` to spawn background worker agents.
+3. Delegate tasks to them and monitor their PRs.
+
+#### Manual Multi-worktree tmux setup
 
 `sandbox-worktrees.sh` lists worktrees and optionally creates tmux windows and/or launches sandboxes:
 
