@@ -7,7 +7,7 @@
 #   sandbox-worktrees.sh [options] [project-dir]
 #
 # Options:
-#   -a, --agent AGENT      Launch sandbox with this agent (claude, gemini, bash).
+#   -a, --agent AGENT      Launch sandbox with this agent (claude, gemini, bash, listener).
 #                           Without -t: launches in the current shell (exec).
 #                           With -t: launches in each tmux window.
 #   -t, --tmux             Create a tmux window per worktree

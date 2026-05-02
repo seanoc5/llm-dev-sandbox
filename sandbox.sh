@@ -165,15 +165,17 @@ fi
 CMD_ARRAY=()
 if [[ $# -eq 0 ]]; then
     case "$AGENT" in
-        claude) CMD_ARRAY=("claude" "--dangerously-skip-permissions") ;;
-        gemini) CMD_ARRAY=("gemini" "--yolo") ;;
-        *)      CMD_ARRAY=("bash" "-i") ;;
+        claude)   CMD_ARRAY=("claude" "--dangerously-skip-permissions") ;;
+        gemini)   CMD_ARRAY=("gemini" "--yolo") ;;
+        listener) CMD_ARRAY=("./worker-listener.sh" "claude") ;;
+        *)        CMD_ARRAY=("bash" "-i") ;;
     esac
 else
     case "$AGENT" in
-        claude) CMD_ARRAY=("claude" "$@" "--dangerously-skip-permissions") ;;
-        gemini) CMD_ARRAY=("gemini" "$@" "--yolo") ;;
-        *)      CMD_ARRAY=("bash" "-c" "$*") ;;
+        claude)   CMD_ARRAY=("claude" "$@" "--dangerously-skip-permissions") ;;
+        gemini)   CMD_ARRAY=("gemini" "$@" "--yolo") ;;
+        listener) CMD_ARRAY=("./worker-listener.sh" "$@") ;;
+        *)        CMD_ARRAY=("bash" "-c" "$*") ;;
     esac
 fi
 
@@ -186,6 +188,17 @@ docker run "${INTERACTIVE_FLAGS[@]}" --rm --init \
     --network host \
     --user "$(id -u):$(id -g)" \
     --workdir "$PROJECT_DIR" \
+    "${ENV_FILE_OPT[@]}" \
+    "${GH_TOKEN_OPTS[@]}" \
+    "${DOCKER_SOCK_OPTS[@]}" \
+    "${SSH_OPTS[@]}" \
+    "${TMUX_OPTS[@]}" \
+    "${MOUNTS[@]}" \
+    -e "TERM=$TERM" \
+    -e "COLORTERM=${COLORTERM:-}" \
+    "$IMAGE" \
+    "${CMD_ARRAY[@]}"
+r "$PROJECT_DIR" \
     "${ENV_FILE_OPT[@]}" \
     "${GH_TOKEN_OPTS[@]}" \
     "${DOCKER_SOCK_OPTS[@]}" \

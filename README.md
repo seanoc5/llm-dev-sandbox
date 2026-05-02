@@ -12,7 +12,26 @@ Crucially, it enables safer "YOLO" operations. Tools like Claude Code offer a `-
 
 This project champions a **local-first** approach. Cloud-based sandboxes (like [E2B](https://e2b.dev/) or [Daytona](https://www.daytona.io/)) are excellent for isolated execution, but they struggle when an agent needs to interact with services running on your local machine—such as a local Postgres database, a running Spring Boot application, or an Ollama instance. This sandbox runs locally with `--network host`, meaning the agent can interact with your entire local development environment exactly as you do, without complex tunneling or port-forwarding setups.
 
-**Similar Projects & Resources:**
+### Multi-Agent Orchestration (2026 Pattern)
+
+As LLMs have reached 1M+ token contexts (e.g., Claude 4.7, Gemini 1.5 Pro), the industry standard for multi-agent development has shifted to **Git Worktree Isolation**. This prevents file lock contention and context pollution when running parallel agents.
+
+This sandbox supports a **Coordinator -> Worker** architecture:
+
+1.  **The Coordinator (Brain):** Runs in the main repository (e.g., using Gemini CLI). It uses `gh` to read issues, defines technical specs, and dispatches tasks to specific worktrees.
+2.  **The Workers (Hands):** Independent sandbox instances (e.g., running Claude Code) deployed in sibling git worktrees (`../wt1`, `../wt2`).
+3.  **The Communication:** The Coordinator communicates with Workers either by injecting commands directly via the mounted `tmux` socket, or by dropping `.agent-task.md` files into the worktrees for a background `worker-listener.sh` to pick up.
+
+#### Open Source Landscape & Alternatives
+
+While you can build complex systems using Python frameworks like **CrewAI** or **LangGraph**, those frameworks often lack safe execution environments. This sandbox provides the missing execution layer.
+
+If you are looking for fully pre-built orchestration tools rather than this custom shell/tmux approach, consider:
+*   **Composio Agent Orchestrator (AO):** Best for enterprise-level, fully autonomous PR handling and CI fixing across worktrees.
+*   **Claude Squad:** A terminal-based orchestrator very similar to this project, focusing on `tmux` session management for solo developers.
+*   **Dagger (Container Use):** Focuses on high-security, headless container execution rather than interactive tmux windows.
+
+**General Similar Projects & Resources:**
 *   **Cloud-based:** [E2B (Secure sandboxes for AI agents)](https://e2b.dev/), [Daytona (Standardized Dev Environments)](https://www.daytona.io/), [Replit Deployments](https://replit.com/)
 *   **Localhost/Docker-based:** [Devcontainers](https://containers.dev/), [Runme](https://runme.dev/)
 *   **Further Reading:** [Anthropic's research on AI safety and containment](https://www.anthropic.com/research), [OWASP Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/)

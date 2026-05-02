@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq ripgrep fd-find unzip zip sudo \
     openssh-client \
     postgresql-client \
-    less vim tree htop \
+    less vim tree htop tmux \
     iproute2 net-tools \
     && rm -rf /var/lib/apt/lists/*
 
