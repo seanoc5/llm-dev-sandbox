@@ -8,10 +8,10 @@ set -euo pipefail
 PROJECT_DIR="$(realpath "${1:-$PWD}")"
 if [ $# -gt 0 ]; then shift; fi
 
-# Determine the agent (claude, gemini, or bash)
+# Determine the agent (claude, gemini, listener, or bash)
 AGENT="bash"
 if [[ $# -gt 0 ]]; then
-    if [[ "$1" == "claude" || "$1" == "gemini" ]]; then
+    if [[ "$1" == "claude" || "$1" == "gemini" || "$1" == "listener" ]]; then
         AGENT="$1"
         shift
     fi
