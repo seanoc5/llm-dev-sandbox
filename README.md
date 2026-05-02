@@ -2,6 +2,21 @@
 
 A persistent, local-first sandbox for running LLM agents like **Claude Code**, **Gemini CLI**, and **promptfoo** against your real host services.
 
+### Why does anyone care?
+
+Running autonomous LLM agents directly on your host machine is inherently risky. Agents can hallucinate destructive shell commands, accidentally delete files outside their intended scope, or execute rogue code from untrusted repositories. This sandbox provides a containment layer that **protects your host system** while still granting the agent access to the specific project files and network services it needs to be useful. 
+
+Crucially, it enables safer "YOLO" operations. Tools like Claude Code offer a `--dangerously-skip-permissions` flag (and Gemini CLI has `--yolo`), which dramatically improves the agent's autonomy and speed by not pausing for human confirmation on every command. By confining the agent within a Docker container, this sandbox lowers the risk of these auto-approve modes, turning "dangerously skip" into "cautiously skip." The agent is free to iterate rapidly, but the blast radius of a mistake is limited to the mounted project directory.
+
+#### Localhost vs. Cloud Sandboxes
+
+This project champions a **local-first** approach. Cloud-based sandboxes (like [E2B](https://e2b.dev/) or [Daytona](https://www.daytona.io/)) are excellent for isolated execution, but they struggle when an agent needs to interact with services running on your local machine—such as a local Postgres database, a running Spring Boot application, or an Ollama instance. This sandbox runs locally with `--network host`, meaning the agent can interact with your entire local development environment exactly as you do, without complex tunneling or port-forwarding setups.
+
+**Similar Projects & Resources:**
+*   **Cloud-based:** [E2B (Secure sandboxes for AI agents)](https://e2b.dev/), [Daytona (Standardized Dev Environments)](https://www.daytona.io/), [Replit Deployments](https://replit.com/)
+*   **Localhost/Docker-based:** [Devcontainers](https://containers.dev/), [Runme](https://runme.dev/)
+*   **Further Reading:** [Anthropic's research on AI safety and containment](https://www.anthropic.com/research), [OWASP Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/)
+
 ## Platform Support
 
 | Platform      | Status          | Notes |
