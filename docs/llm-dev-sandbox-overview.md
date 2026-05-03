@@ -185,7 +185,20 @@ echo "Fix issue #42. Details: $(gh issue view 42)" > ../wt-issue-42/.agent-task.
 
 Note the `tmux new-window -d` — workers spawn *in the background* so they don't steal focus.
 
-### `test-e2e-swarm.sh` — Local end-to-end test
+### `test-shape-swarm.sh` — Non-LLM shape test for the queue protocol
+
+Deterministic regression coverage for `worker-listener.sh` that doesn't burn LLM tokens or require auth. Uses the listener's `bash` fallback agent (executed when AGENT is neither `claude` nor `gemini`) to make task briefs runnable shell commands; assertions then check files produced by those briefs.
+
+Covers:
+- v2 happy path: atomic-write to `inbox/`, brief archives to `done/`, `.ok.json` written with full schema validation
+- v2 failure path: non-zero exit produces `.err.json` with the right `exit_code` and `outcome`
+- v1 legacy: `.agent-task.md` → `.agent-task-last.md`, no spurious JSON
+- Lex ordering: 3 v2 tasks processed in queue order
+- `.tmp.*` exclusion: in-flight atomic-write filenames must not be claimed
+
+Runs in seconds. Pair with `test-e2e-swarm.sh` for full claude/gemini path coverage when you have auth + want to validate the LLM end too. Use `KEEP=1` to retain the temp dir for inspection.
+
+### `test-e2e-swarm.sh` — Local end-to-end test (with real LLM)
 
 Spins up `/tmp/swarm-e2e-<epoch>/main-repo` as a fresh git repo, copies the project's `.env` (so the coordinator inherits `GEMINI_API_KEY`), and invokes `llm-start.sh` with a hardcoded prompt that asks the coordinator to:
 
