@@ -1,0 +1,41 @@
+# .swarm-policy.md.example
+#
+# Copy this to the ROOT of a project as `.swarm-policy.md` to give the
+# llm-dev-sandbox coordinator a per-project rules-of-engagement file.
+# The coordinator reads it on every wake (Initial Startup Checklist step 1)
+# and embeds it verbatim into every worker's `.agent-task.md` brief under
+# a "## Project Guardrails (MUST OBEY)" header.
+#
+# Format: free-form markdown. The coordinator does not parse it; it just
+# pastes the whole file into the worker brief. Be explicit and concrete.
+# The worker (claude / gemini) reads it as part of its task and will refuse
+# to violate clearly-stated rules in --yolo / --dangerously-skip-permissions
+# mode (which otherwise has no other constraint).
+
+---
+
+## Pull-request rules
+- Workers may **only push branches**; never `merge`, `gh pr merge`, `git push origin master`, or anything that lands code on the default branch.
+- PR titles must start with `[swarm]` so they're easy to filter in the UI.
+- PR bodies must include the issue number being closed (`Closes #N`).
+- Do not approve your own PR. Leave PRs in OPEN state for human review.
+
+## File-modification rules
+- Do **not** modify any of: `Dockerfile`, `docker-compose.yml`, `flyway/**`, `secrets/**`, `.env*`, `package-lock.json` (unless the task explicitly says so), `*.lock` (Gradle).
+- Do **not** delete or rename files unless the task explicitly says so.
+- Do **not** touch CI config (`.github/workflows/**`, `.gitlab-ci.yml`).
+
+## Tool-use rules
+- Do **not** run any `gradle` task matching `*release*`, `*publish*`, `*deploy*`.
+- Do **not** run `kubectl`, `terraform`, `aws`, or any cloud CLI without explicit per-task approval.
+- Database migrations are read-only research only — do not apply them.
+- Network calls are fine for `gh`, `git`, `npm`, `pip`/`uv`, package registries; everything else is suspect.
+
+## Concurrency rules
+- Maximum 1 active worker per worktree.
+- Do not spawn additional workers from inside a worker (no recursive provisioning).
+
+## Communication rules
+- If you (the worker) hit a real ambiguity that needs human input, **stop and ask in the pane**. Do not guess. Do not silently change scope.
+- If the task is impossible as specified, write a short summary of why into `.agent-task-failed.md` and exit. Do not push a half-baked PR.
+- Do not write any comments containing your model identifier or self-attribution unless explicitly asked.

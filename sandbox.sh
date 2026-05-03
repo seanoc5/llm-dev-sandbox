@@ -185,13 +185,19 @@ fi
 # Get the directory of this script so we can find worker-listener.sh
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 
+# Worker agent selection. WORKER_CMD chooses the LLM CLI the listener will
+# dispatch to (default claude). The listener picks up the choice from its
+# first arg here; WORKER_MODEL is read by the listener directly from the
+# container's env (already passed-through above via WORKER_ENV_OPTS).
+WORKER_AGENT="${WORKER_CMD:-claude}"
+
 # Construct command as an array
 CMD_ARRAY=()
 if [[ $# -eq 0 ]]; then
     case "$AGENT" in
         claude)   CMD_ARRAY=("claude" "--dangerously-skip-permissions") ;;
         gemini)   CMD_ARRAY=("gemini" "--yolo") ;;
-        listener) CMD_ARRAY=("$SCRIPT_DIR/worker-listener.sh" "claude") ;;
+        listener) CMD_ARRAY=("$SCRIPT_DIR/worker-listener.sh" "$WORKER_AGENT") ;;
         *)        CMD_ARRAY=("bash" "-i") ;;
     esac
 else

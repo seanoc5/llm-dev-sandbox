@@ -16,11 +16,22 @@
 #                        and any automation where no human is attached.
 
 AGENT="${1:-claude}"
+MODEL="${WORKER_MODEL:-}"
 TASK_FILE=".agent-task.md"
 HEADLESS="${WORKER_HEADLESS:-0}"
 
+# Build per-agent model flag from WORKER_MODEL (no-op when unset → use the
+# agent CLI's own default). claude uses --model, gemini uses -m.
+MODEL_OPTS=()
+if [ -n "$MODEL" ]; then
+    case "$AGENT" in
+        claude) MODEL_OPTS=(--model "$MODEL") ;;
+        gemini) MODEL_OPTS=(-m "$MODEL") ;;
+    esac
+fi
+
 echo "--- Worker Listener Active ---"
-echo "Agent:  $AGENT"
+echo "Agent:  $AGENT${MODEL:+ (model: $MODEL)}"
 echo "Mode:   $([ "$HEADLESS" = "1" ] && echo headless || echo interactive)"
 echo "Watching for: $TASK_FILE"
 [ "$HEADLESS" = "1" ] || cat <<'NOTE'
@@ -70,15 +81,15 @@ while true; do
         # `-p` also skips claude's "Trust this folder?" dialog by design.
         if [[ "$AGENT" == "claude" ]]; then
             if [ "$HEADLESS" = "1" ]; then
-                claude -p "$TASK" --dangerously-skip-permissions
+                claude "${MODEL_OPTS[@]}" -p "$TASK" --dangerously-skip-permissions
             else
-                claude "$TASK" --dangerously-skip-permissions
+                claude "${MODEL_OPTS[@]}" "$TASK" --dangerously-skip-permissions
             fi
         elif [[ "$AGENT" == "gemini" ]]; then
             if [ "$HEADLESS" = "1" ]; then
-                gemini -p "$TASK" --yolo --skip-trust
+                gemini "${MODEL_OPTS[@]}" -p "$TASK" --yolo --skip-trust
             else
-                gemini -i "$TASK" --yolo --skip-trust
+                gemini "${MODEL_OPTS[@]}" -i "$TASK" --yolo --skip-trust
             fi
         else
             bash -c "$TASK"

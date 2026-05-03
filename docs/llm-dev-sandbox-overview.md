@@ -92,6 +92,21 @@ Idempotent script that fixes one known host-side issue: the npm-published `@goog
 
 Run once after install, and again after any `npm i -g @google/gemini-cli` upgrade. The Dockerfile applies the equivalent fix at image-build time, so workers don't need this.
 
+### `.swarm-policy.md` — Per-project rules-of-engagement (optional)
+
+Drop a `.swarm-policy.md` file at the root of any project to give the coordinator binding constraints for *that project's* workers. The coordinator reads it on every wake and embeds the contents verbatim at the top of every worker's task brief under a `## Project Guardrails (MUST OBEY)` header.
+
+Free-form markdown — typical contents include:
+- PR rules (`workers may only push branches`, `PR titles must include [swarm]`, etc.)
+- File-modification denylist (`do not touch Dockerfile / flyway/** / secrets/** / .env*`)
+- Tool-use denylist (`no gradle *release*`, `no kubectl/terraform/aws`, `no DB migrations`)
+- Concurrency caps (`max 1 active worker per worktree`)
+- Communication rules (`stop and ask in pane on real ambiguity, don't guess`)
+
+A starter is in [`examples/swarm-policy.md.example`](../examples/swarm-policy.md.example) — copy to your project root, edit, commit. Per-project means your monorepo can have stricter rules than your scratch repo.
+
+If the file is absent, the coordinator omits the Guardrails section entirely (no fabricated rules).
+
 ### `coordinator-error-tail.sh` — Surface gemini API errors in the pane
 
 Called automatically by `llm-start.sh` immediately after every gemini invocation. Checks for `/tmp/gemini-*-error-*.json` files modified in the last minute and decodes the nested `.error.message` (gemini's API errors are double-encoded JSON) into the pane.
@@ -104,16 +119,31 @@ No-op for the claude path: claude's `-p` already streams errors and tool calls d
 
 Runs inside the worker sandbox. Polls every 2 seconds for a `.agent-task.md` file in the cwd. When found:
 
-1. Reads the task into `$TASK`.
+1. Reads the task into `$TASK` and prints the brief (first 40 lines) to the pane so an attached observer sees what's being worked on.
 2. Renames the file to `.agent-task-last.md` (so it's not re-executed and stays as a debugging artifact).
-3. Dispatches to the agent: currently `claude "$TASK" --dangerously-skip-permissions` (hard-coded — see `../todo/TODO.md` for the parameterization task).
+3. Dispatches to the agent (default claude, override via `WORKER_CMD`; default model from the agent's CLI, override via `WORKER_MODEL`).
 4. Loops back to wait for the next task.
+
+#### Worker mode
+
+| Mode                  | Agent flags                                | Lifecycle                                                                                                  |
+|-----------------------|--------------------------------------------|------------------------------------------------------------------------------------------------------------|
+| **interactive** (default) | `claude "$TASK"` / `gemini -i "$TASK"` | Runs prompt + tools, drops to REPL. User attaches to interact / answer questions / `/quit` when done.       |
+| **headless** (`WORKER_HEADLESS=1`) | `claude -p "$TASK"` / `gemini -p "$TASK"` | Prints output and exits. Skips claude's "Trust this folder?" dialog. Used by e2e tests and any automation. |
+
+#### Worker env vars (threaded through `caller → llm-start.sh → tmux session env → sandbox.sh -e → container env`)
+
+| Variable              | Default          | Notes                                                                                       |
+|-----------------------|------------------|---------------------------------------------------------------------------------------------|
+| `WORKER_CMD`          | `claude`         | Switches the worker's LLM CLI (e.g. `gemini` for fallback when claude Max is capped).       |
+| `WORKER_MODEL`        | (CLI default)    | Passed as `--model` (claude) or `-m` (gemini). E.g. `sonnet`, `gemini-2.5-flash`.            |
+| `WORKER_HEADLESS`     | `0`              | When `1`, run agent with `-p` (print + exit). Required when no human is attached.           |
 
 This decouples the coordinator from the workers: the coordinator just drops a markdown file into the worktree and the worker picks it up asynchronously.
 
 ### `COORDINATOR_SYSTEM_PROMPT.md` — Coordinator's brain
 
-Defines the coordinator's startup checklist (`git status` → `gh issue list` → backlog grooming → provision up to 3 workers) and the exact shell commands for spawning a worker:
+Defines the coordinator's startup checklist (read `.swarm-policy.md` → `git status` → `gh issue list` → backlog grooming → provision up to 3 workers) and the exact shell commands for spawning a worker:
 
 ```bash
 git worktree add ../wt-issue-42 -b fix/issue-42
