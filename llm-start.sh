@@ -90,6 +90,12 @@ if ! $session_existed; then
     if [ -n "${GEMINI_API_KEY:-}" ]; then
         TMUX_ENV_OPTS+=(-e "GEMINI_API_KEY=$GEMINI_API_KEY")
     fi
+    # Propagate WORKER_HEADLESS into the session so any worker windows the
+    # coordinator spawns inherit it (used by automation/tests where no human
+    # is attached to answer claude's trust dialog or interactive REPL).
+    if [ -n "${WORKER_HEADLESS:-}" ]; then
+        TMUX_ENV_OPTS+=(-e "WORKER_HEADLESS=$WORKER_HEADLESS")
+    fi
     if [ -n "$GEMINI_ENV_SOURCED" ]; then
         echo "Loaded GEMINI_API_KEY from $GEMINI_ENV_SOURCED"
     fi

@@ -4,13 +4,34 @@
 #
 # This script runs inside a worktree sandbox. It watches for a .agent-task.md
 # file, executes the task using the local agent, and then waits for the next.
+#
+# Mode (controlled by WORKER_HEADLESS env var):
+#   default            — interactive. Agent runs the seeded prompt, then stays
+#                        alive in REPL so an attached user can answer questions
+#                        the agent asks. Exit with /quit (claude) or Ctrl-D.
+#                        First run per worktree: claude prompts "Trust this
+#                        folder? Y/n" — answer Y to proceed.
+#   WORKER_HEADLESS=1  — agent runs with -p (claude) / -p (gemini), prints,
+#                        and exits. Skips the trust dialog. Used by e2e tests
+#                        and any automation where no human is attached.
 
 AGENT="${1:-claude}"
 TASK_FILE=".agent-task.md"
+HEADLESS="${WORKER_HEADLESS:-0}"
 
 echo "--- Worker Listener Active ---"
 echo "Agent:  $AGENT"
+echo "Mode:   $([ "$HEADLESS" = "1" ] && echo headless || echo interactive)"
 echo "Watching for: $TASK_FILE"
+[ "$HEADLESS" = "1" ] || cat <<'NOTE'
+
+  Interactive mode: agent will run the seeded prompt and then drop to
+  its REPL. Attach with `tmux a -t <session>` and switch to this window
+  to interact. On first run claude will ask "Trust this folder?" — say Y.
+  When done, /quit (claude) or Ctrl-D (gemini) to release the listener
+  for the next task. Set WORKER_HEADLESS=1 to disable.
+
+NOTE
 echo "------------------------------"
 
 while true; do
@@ -38,14 +59,27 @@ while true; do
         echo "----------------------------------------------------------"
 
         echo "[$(date +%T)] Executing task..."
-        
-        # Run the agent with the task in headless/print mode so it executes
-        # non-interactively (no trust-folder dialog, no chat loop) and exits
-        # when done. The listener loop then waits for the next task.
+
+        # Default: interactive — agent runs the seeded prompt, prints tool
+        # calls + final answer, then drops to its REPL so an attached user
+        # can answer follow-up questions. The listener loop is blocked here
+        # until the agent exits (/quit or Ctrl-D).
+        #
+        # WORKER_HEADLESS=1: revert to print-and-exit semantics. Used by the
+        # e2e test path (which has no human attached) and any automation.
+        # `-p` also skips claude's "Trust this folder?" dialog by design.
         if [[ "$AGENT" == "claude" ]]; then
-            claude -p "$TASK" --dangerously-skip-permissions
+            if [ "$HEADLESS" = "1" ]; then
+                claude -p "$TASK" --dangerously-skip-permissions
+            else
+                claude "$TASK" --dangerously-skip-permissions
+            fi
         elif [[ "$AGENT" == "gemini" ]]; then
-            gemini -p "$TASK" --yolo --skip-trust
+            if [ "$HEADLESS" = "1" ]; then
+                gemini -p "$TASK" --yolo --skip-trust
+            else
+                gemini -i "$TASK" --yolo --skip-trust
+            fi
         else
             bash -c "$TASK"
         fi

@@ -128,6 +128,16 @@ if [ -f "$PROJECT_DIR/.sandbox-env" ]; then
     ENV_FILE_OPT=(--env-file "$PROJECT_DIR/.sandbox-env")
 fi
 
+# Pass-through env vars the worker agents read. `-e VAR` (no value) tells
+# Docker to pull the value from this caller's environment if set, otherwise
+# omit — so we never embed values in argv.
+WORKER_ENV_OPTS=()
+for _v in WORKER_HEADLESS WORKER_CMD WORKER_MODEL; do
+    if [ -n "${!_v:-}" ]; then
+        WORKER_ENV_OPTS+=(-e "$_v")
+    fi
+done
+
 # Docker-outside-of-Docker: mount the host socket so Testcontainers and docker CLI work.
 # --group-add gives the sandbox user permission to write to the socket.
 # TESTCONTAINERS_HOST_OVERRIDE=localhost is needed with --network host so Testcontainers
@@ -206,6 +216,7 @@ exec docker run "${INTERACTIVE_FLAGS[@]}" --rm --init \
     "${GH_TOKEN_OPTS[@]}" \
     "${DOCKER_SOCK_OPTS[@]}" \
     "${SSH_OPTS[@]}" \
+    "${WORKER_ENV_OPTS[@]}" \
     "${MOUNTS[@]}" \
     -e "TERM=$TERM" \
     -e "COLORTERM=${COLORTERM:-}" \
