@@ -26,15 +26,19 @@ tmux new-window -d -n "iss-42" "/opt/work/sysadmin/llm-dev-sandbox/sandbox.sh ..
 ```
 
 **3. Delegate the Task:**
-Write a highly detailed specification into the `.agent-task.md` file located at the root of the new worktree. The `listener` daemon you just started in that window will automatically pick this file up and start Claude.
+Drop a brief into the worker's queue at `<worktree>/.swarm/tasks/inbox/<task-id>.md`. The listener creates the queue dirs on startup, but `mkdir -p` it defensively so there's no race. Use a unique timestamp-based id and **atomic write** (mktemp in the same dir, then mv) so the listener never sees a half-written file.
 
-**If `.swarm-policy.md` exists in the project root**, you must embed its contents verbatim at the TOP of the task brief, prefixed with a `## Project Guardrails (MUST OBEY)` header. The worker reads this in the same brief and will treat the policy as binding. Use a heredoc to keep it readable:
+**If `.swarm-policy.md` exists in the project root**, embed its contents verbatim at the TOP of the brief under a `## Project Guardrails (MUST OBEY)` header. The worker reads this in the same brief and will treat the policy as binding.
 
 ```bash
-cat > ../wt-issue-42/.agent-task.md <<EOF
+WT=../wt-issue-42
+mkdir -p "$WT/.swarm/tasks/inbox"
+TASK_ID="$(date +%Y%m%d-%H%M%S)-$$"
+TMP=$(mktemp -p "$WT/.swarm/tasks/inbox" .tmp.XXXX.md)
+cat > "$TMP" <<EOF
 ## Project Guardrails (MUST OBEY)
 
-$(cat .swarm-policy.md 2>/dev/null || echo "(no .swarm-policy.md present)")
+$(cat .swarm-policy.md 2>/dev/null || echo "(no .swarm-policy.md present — proceed with default behavior)")
 
 ---
 
@@ -44,16 +48,24 @@ Fix issue #42. Details:
 
 $(gh issue view 42)
 EOF
+mv "$TMP" "$WT/.swarm/tasks/inbox/$TASK_ID.md"
 ```
 
-If `.swarm-policy.md` does not exist, omit the Guardrails section entirely (don't fabricate rules):
-```bash
-echo "Fix issue #42. Details: $(gh issue view 42)" > ../wt-issue-42/.agent-task.md
-```
+The atomic `mv` (rename within the same filesystem) ensures the listener picks up only fully-written briefs.
+
+**Legacy v1 protocol** (`.agent-task.md` in the worktree root) is still supported by the listener for backward compatibility, but you should always use the v2 queue above for new tasks — it gives you a structured outcome file in `done/` that you can poll later (see Monitoring).
 
 ## Ongoing Monitoring (The Loop)
 Once workers are provisioned, you act as the supervisor. If the user asks for a status update, you must:
-1. Run `tmux list-windows` to see if worker windows are still running.
-2. Run `gh pr list` to see if workers have submitted their code.
-3. If a worker window closes but no PR was created, the worker failed. You should read the `logs.json` or `.agent-task-last.md` in their worktree to investigate why.
-4. If a worker opened a PR, you should assign another worker to review it, or review the diff yourself.
+
+1. **Worker process state:** Run `tmux list-windows` to see if worker windows are still running.
+2. **Structured outcomes (preferred — v2 protocol):** Look for `*.json` outcome files across all worktrees:
+   ```bash
+   for f in ../wt-issue-*/.swarm/tasks/done/*.json; do
+       echo "$f:"; cat "$f"
+   done
+   ```
+   Each file contains `task_id`, `started`, `finished`, `duration_seconds`, `exit_code`, `outcome` (`ok`/`err`), `agent`, `model`. `outcome=err` (or `exit_code != 0`) means the worker's last task failed — read `done/<id>.md` for the brief that didn't complete cleanly.
+3. **PRs:** Run `gh pr list` to see if workers have submitted their code.
+4. **Failure investigation:** If a worker window closes but no PR was created, check the structured outcome file first; fall back to the brief in `done/<id>.md` (v2) or `.agent-task-last.md` (v1) and the pane scrollback.
+5. **Review:** If a worker opened a PR, you should assign another worker to review it, or review the diff yourself.

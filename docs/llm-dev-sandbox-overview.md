@@ -28,7 +28,7 @@ Running autonomous LLM agents directly on your host is risky: a hallucinated `rm
 |  +-------+----------+  +----+----------+   +-----+----------+  |
 |  | main repo        |  | wt-issue-42   |   | wt-issue-57    |  |
 |  | (host fs)        |  | (worktree)    |   | (worktree)     |  |
-|  |                  |  | .agent-task.md|   | .agent-task.md |  |
+|  |                  |  | .swarm/tasks/ |   | .swarm/tasks/  |  |
 |  +------------------+  +---------------+   +----------------+  |
 +----------------------------------------------------------------+
 ```
@@ -115,14 +115,46 @@ Without this, gemini-cli truncates server-side errors to `Operation cancelled.[E
 
 No-op for the claude path: claude's `-p` already streams errors and tool calls directly.
 
-### `worker-listener.sh` — Inbox for worker agents
+### `worker-listener.sh` — Queue watcher for worker agents
 
-Runs inside the worker sandbox. Polls every 2 seconds for a `.agent-task.md` file in the cwd. When found:
+Runs inside the worker sandbox. Polls every 2 seconds for new tasks. Two protocols supported:
 
-1. Reads the task into `$TASK` and prints the brief (first 40 lines) to the pane so an attached observer sees what's being worked on.
-2. Renames the file to `.agent-task-last.md` (so it's not re-executed and stays as a debugging artifact).
-3. Dispatches to the agent (default claude, override via `WORKER_CMD`; default model from the agent's CLI, override via `WORKER_MODEL`).
-4. Loops back to wait for the next task.
+**v2 queue (preferred)** — per-worktree directory tree:
+
+```
+<worktree>/.swarm/tasks/
+  inbox/        coordinator writes <id>.md here (atomic mktemp+mv)
+  processing/   listener mv on pickup (atomic claim — wins race if multiple listeners)
+  done/         listener mv when finished + writes <id>.{ok,err}.json
+```
+
+`done/<id>.{ok,err}.json` is a structured outcome record the coordinator can poll without scraping the pane:
+
+```json
+{
+  "task_id": "20260504-031415-1234",
+  "started":  "2026-05-04T03:14:15Z",
+  "finished": "2026-05-04T03:18:42Z",
+  "duration_seconds": 267,
+  "exit_code": 0,
+  "outcome": "ok",
+  "agent": "claude",
+  "model": null,
+  "headless": false
+}
+```
+
+**v1 single-file (legacy, still supported)** — `.agent-task.md` → `.agent-task-last.md`. No structured outcome.
+
+The listener checks v2 inbox first, falls back to v1. Both can be in use simultaneously (mid-migration). New work should use v2.
+
+#### Listener loop, per task:
+
+1. **Claim** via atomic `mv` (v2) or rename (v1).
+2. **Echo brief** (first 40 lines) to the pane so attached observers see what's running.
+3. **Dispatch** the configured agent (default claude, override via `WORKER_CMD`; default model from the agent's CLI, override via `WORKER_MODEL`).
+4. **Archive + record** — move brief to `done/` (v2) or `.agent-task-last.md` (v1); for v2 also write `done/<id>.{ok,err}.json` with timing + exit code.
+5. **Loop** back for the next task.
 
 #### Worker mode
 
@@ -192,8 +224,12 @@ The disk *is* the coordinator's memory across invocations: worktrees, branches, 
 
 ## Known Limitations
 
-- Workers are hard-coded to `claude`; see `todo/TODO.md` for parameterization plan.
-- Worker inbox is a single polled file (`.agent-task.md`) with no locking or structured ack — fine for 1 coordinator + 1 worker per worktree, but a 2nd dispatch during execution races. Queued-protocol redesign also in `todo/TODO.md`.
+<!-- Both pre-existing limitations resolved this session:
+     - Worker parameterization → WORKER_CMD/WORKER_MODEL plumbed through
+     - Queued protocol → .swarm/tasks/{inbox,processing,done}/ with atomic
+       mv claims and structured outcome JSON; legacy .agent-task.md still
+       works for backward compat. -->
+
 - `gemini-3-flash-preview` (and possibly other preview models) hit a server-side `400 INVALID_ARGUMENT` on multi-tool-call sequences — which is exactly the coordinator's workload. Stick to `gemini-2.5-flash` (the default) until Google fixes the preview tier.
 - ripgrep symlink (host) survives gemini-cli upgrades only if you re-run `setup.sh`. Add to your shell rc or a post-`npm-i` hook if you upgrade often.
 
