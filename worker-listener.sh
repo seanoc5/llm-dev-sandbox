@@ -16,13 +16,27 @@ echo "------------------------------"
 while true; do
     if [ -f "$TASK_FILE" ]; then
         echo "[$(date +%T)] Task received!"
-        
+
         # Read the task
         TASK=$(cat "$TASK_FILE")
-        
+
         # Archive/Rename the task file so we don't run it twice
         mv "$TASK_FILE" ".agent-task-last.md"
-        
+
+        # Echo the task brief so anyone attached to this tmux window can see
+        # what the worker is actually working on (otherwise the user just
+        # sees a blank "Executing task..." line until the agent prints its
+        # first tool call). Truncate after a sane line count to avoid
+        # spamming the pane on huge prompts; the full text is always still
+        # available in .agent-task-last.md.
+        echo "--- Task brief (first 40 lines of .agent-task-last.md) ---"
+        printf '%s\n' "$TASK" | head -40
+        TASK_LINES=$(printf '%s\n' "$TASK" | wc -l)
+        if [ "$TASK_LINES" -gt 40 ]; then
+            echo "... [truncated; $TASK_LINES total lines — see .agent-task-last.md for full] ..."
+        fi
+        echo "----------------------------------------------------------"
+
         echo "[$(date +%T)] Executing task..."
         
         # Run the agent with the task in headless/print mode so it executes
