@@ -67,6 +67,10 @@ if command -v git &>/dev/null && git -C "$PROJECT_DIR" rev-parse --git-dir &>/de
     fi
 fi
 
+# Ensure the sandbox script directory is mounted so helper scripts (like worker-listener.sh) are available
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+MOUNTS+=( "-v" "$SCRIPT_DIR:$SCRIPT_DIR:ro" )
+
 # Allow for additional mounts via environment variable
 if [ -n "${EXTRA_MOUNTS:-}" ]; then
     IFS=',' read -ra ADDR <<< "$EXTRA_MOUNTS"
@@ -141,12 +145,19 @@ fi
 # GitHub CLI token — gh stores the token in the system keyring on Linux, not in
 # ~/.config/gh/hosts.yml, so mounting the config dir isn't enough. Read it here
 # from the host and pass it in as GH_TOKEN so the CLI works without re-authing.
+#
+# SECURITY: We export GH_TOKEN into our own env and pass `-e GH_TOKEN` (no value)
+# to docker. Docker then reads the value from our env at run time, so the token
+# never appears in the container's argv (which would be visible via `ps -ef`,
+# /proc/<pid>/cmdline, audit logs, and shell history).
 GH_TOKEN_OPTS=()
 if command -v gh &>/dev/null; then
     _gh_token=$(gh auth token 2>/dev/null)
     if [ -n "$_gh_token" ]; then
-        GH_TOKEN_OPTS=(-e "GH_TOKEN=$_gh_token")
+        export GH_TOKEN="$_gh_token"
+        GH_TOKEN_OPTS=(-e GH_TOKEN)
     fi
+    unset _gh_token
 fi
 
 # SSH Agent Forwarding
@@ -161,20 +172,23 @@ if [ -t 0 ]; then
     INTERACTIVE_FLAGS=("-it")
 fi
 
+# Get the directory of this script so we can find worker-listener.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+
 # Construct command as an array
 CMD_ARRAY=()
 if [[ $# -eq 0 ]]; then
     case "$AGENT" in
         claude)   CMD_ARRAY=("claude" "--dangerously-skip-permissions") ;;
         gemini)   CMD_ARRAY=("gemini" "--yolo") ;;
-        listener) CMD_ARRAY=("./worker-listener.sh" "claude") ;;
+        listener) CMD_ARRAY=("$SCRIPT_DIR/worker-listener.sh" "claude") ;;
         *)        CMD_ARRAY=("bash" "-i") ;;
     esac
 else
     case "$AGENT" in
         claude)   CMD_ARRAY=("claude" "$@" "--dangerously-skip-permissions") ;;
         gemini)   CMD_ARRAY=("gemini" "$@" "--yolo") ;;
-        listener) CMD_ARRAY=("./worker-listener.sh" "$@") ;;
+        listener) CMD_ARRAY=("$SCRIPT_DIR/worker-listener.sh" "$@" "--dangerously-skip-permissions") ;;
         *)        CMD_ARRAY=("bash" "-c" "$*") ;;
     esac
 fi
@@ -184,21 +198,10 @@ echo "Project:  $PROJECT_DIR"
 echo "Agent:    $AGENT"
 echo "---------------------------"
 
-docker run "${INTERACTIVE_FLAGS[@]}" --rm --init \
+exec docker run "${INTERACTIVE_FLAGS[@]}" --rm --init \
     --network host \
     --user "$(id -u):$(id -g)" \
     --workdir "$PROJECT_DIR" \
-    "${ENV_FILE_OPT[@]}" \
-    "${GH_TOKEN_OPTS[@]}" \
-    "${DOCKER_SOCK_OPTS[@]}" \
-    "${SSH_OPTS[@]}" \
-    "${TMUX_OPTS[@]}" \
-    "${MOUNTS[@]}" \
-    -e "TERM=$TERM" \
-    -e "COLORTERM=${COLORTERM:-}" \
-    "$IMAGE" \
-    "${CMD_ARRAY[@]}"
-r "$PROJECT_DIR" \
     "${ENV_FILE_OPT[@]}" \
     "${GH_TOKEN_OPTS[@]}" \
     "${DOCKER_SOCK_OPTS[@]}" \

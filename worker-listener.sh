@@ -25,12 +25,13 @@ while true; do
         
         echo "[$(date +%T)] Executing task..."
         
-        # Run the agent with the task
-        # We use 'eval' or direct call depending on how the agent handles input
+        # Run the agent with the task in headless/print mode so it executes
+        # non-interactively (no trust-folder dialog, no chat loop) and exits
+        # when done. The listener loop then waits for the next task.
         if [[ "$AGENT" == "claude" ]]; then
-            claude "$TASK"
+            claude -p "$TASK" --dangerously-skip-permissions
         elif [[ "$AGENT" == "gemini" ]]; then
-            gemini "$TASK"
+            gemini -p "$TASK" --yolo --skip-trust
         else
             bash -c "$TASK"
         fi
