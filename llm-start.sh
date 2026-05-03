@@ -14,7 +14,7 @@ INITIAL_PROMPT="${1:-Execute the Initial Startup Checklist.}"
 
 # Allow overriding the coordinator command and model
 COORD_CMD="${COORDINATOR_CMD:-gemini}"
-COORD_MODEL="${COORDINATOR_MODEL:-gemini-2.5-flash}"
+COORD_MODEL="${COORDINATOR_MODEL:-gemini-3-flash-preview}"
 
 # Auto-discover GEMINI_API_KEY when running gemini coordinator. Gemini CLI only
 # auto-loads .env from CWD/walks up to $HOME and ~/.gemini/.env — it never
