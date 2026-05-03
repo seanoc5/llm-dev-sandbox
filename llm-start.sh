@@ -14,7 +14,11 @@ INITIAL_PROMPT="${1:-Execute the Initial Startup Checklist.}"
 
 # Allow overriding the coordinator command and model
 COORD_CMD="${COORDINATOR_CMD:-gemini}"
-COORD_MODEL="${COORDINATOR_MODEL:-gemini-3-flash-preview}"
+# gemini-2.5-flash is stable; gemini-3-flash-preview returns INVALID_ARGUMENT
+# ("Please ensure that function response turn comes immediately after a function
+# call turn") on multi-step tool sequences, which is the coordinator's whole
+# job. Override with COORDINATOR_MODEL=gemini-3-flash-preview when re-testing.
+COORD_MODEL="${COORDINATOR_MODEL:-gemini-2.5-flash}"
 
 # Auto-discover GEMINI_API_KEY when running gemini coordinator. Gemini CLI only
 # auto-loads .env from CWD/walks up to $HOME and ~/.gemini/.env — it never
