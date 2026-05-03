@@ -42,6 +42,16 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/b
 # LLM CLIs & Tools
 RUN npm install -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex promptfoo
 
+# Fix gemini-cli's missing vendored ripgrep — the npm package omits the
+# binary, so symlink the system rg (already installed earlier in this
+# Dockerfile) into the path gemini's getRipgrepPath() expects. Without
+# this, gemini logs "Ripgrep is not available. Falling back to GrepTool."
+# and uses a slower built-in matcher.
+# (linux-x64 only; build args would be needed for arm64 multi-arch.)
+RUN GEMINI_DIR="$(npm root -g)/@google/gemini-cli" \
+    && mkdir -p "${GEMINI_DIR}/bundle/vendor/ripgrep" \
+    && ln -sf /usr/bin/rg "${GEMINI_DIR}/bundle/vendor/ripgrep/rg-linux-x64"
+
 # Docker CLI (for DooD — Testcontainers and general docker commands)
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
     | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \

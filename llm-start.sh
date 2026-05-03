@@ -97,10 +97,22 @@ if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
         BASE_CMD="$COORD_CMD"
     fi
 
-    # Launch the coordinator with the initial query read from the temp file.
-    # Both gemini -p and claude -p run in headless print mode and exit; this
-    # mirrors the existing one-shot semantics across both backends.
-    tmux send-keys -t "$SESSION_NAME:coordinator" "$BASE_CMD -p \"\$(cat '$TMP_PROMPT')\"; rm '$TMP_PROMPT'" C-m
+    # Default: -p (headless print mode). Both gemini and claude run the prompt
+    # and exit. claude's -p prints tool calls as it works (verbose by default);
+    # gemini's -p prints only the final answer (silent during work).
+    #
+    # COORDINATOR_VERBOSE=1 swaps gemini's -p for -i (--prompt-interactive)
+    # so you can attach to the pane and watch tool calls live. Trade-off: the
+    # gemini agent stays alive after the prompt completes — exit it manually
+    # with /quit or Ctrl-D when satisfied. claude is unaffected since its -p
+    # is already verbose.
+    if [ "$COORD_CMD" = "gemini" ] && [ "${COORDINATOR_VERBOSE:-0}" = "1" ]; then
+        PROMPT_FLAG="-i"
+        echo "COORDINATOR_VERBOSE=1: gemini will stay interactive after the prompt; exit with /quit."
+    else
+        PROMPT_FLAG="-p"
+    fi
+    tmux send-keys -t "$SESSION_NAME:coordinator" "$BASE_CMD $PROMPT_FLAG \"\$(cat '$TMP_PROMPT')\"; rm '$TMP_PROMPT'" C-m
 else
     echo "Session $SESSION_NAME already exists."
 fi
