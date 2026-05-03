@@ -2,6 +2,36 @@ FROM buildpack-deps:noble
 
 ARG DEBIAN_FRONTEND=noninteractive
 
+# -----------------------------------------------------------------------------
+# Toolchain version pins
+# -----------------------------------------------------------------------------
+# All four LLM CLIs and the two non-apt installs (deno, uv) are pinned to
+# explicit versions so `docker build` is reproducible. To upgrade any tool,
+# bump its ARG below or pass `--build-arg <NAME>=<VERSION>` on the command
+# line. Verify upstream's release notes before bumping — npm packages
+# occasionally rename flags (claude-code) or change tool-call protocols
+# (gemini-cli) in minor releases.
+#
+# Find the current latest with:
+#   npm view @anthropic-ai/claude-code version
+#   npm view @google/gemini-cli version
+#   npm view @openai/codex version
+#   npm view promptfoo version
+#   curl -s https://api.github.com/repos/denoland/deno/releases/latest    | jq -r .tag_name
+#   curl -s https://api.github.com/repos/astral-sh/uv/releases/latest     | jq -r .tag_name
+#
+# (Apt-managed tools — Java, ripgrep, gh, docker-cli — are intentionally NOT
+# pinned to dpkg version strings; the maintenance overhead outweighs the
+# benefit for a personal-dev sandbox. Major versions are still pinned via
+# package selection: openjdk-21, NodeSource setup_22.x.)
+ARG NODE_MAJOR=22
+ARG CLAUDE_CODE_VERSION=2.1.126
+ARG GEMINI_CLI_VERSION=0.40.1
+ARG OPENAI_CODEX_VERSION=0.128.0
+ARG PROMPTFOO_VERSION=0.121.9
+ARG DENO_VERSION=2.7.14
+ARG UV_VERSION=0.11.8
+
 # buildpack-deps:noble already provides:
 #   build-essential, curl, wget, git, ca-certificates, gnupg, and a large set of dev libs.
 #
@@ -25,22 +55,37 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openjdk-21-jdk-headless \
     && rm -rf /var/lib/apt/lists/*
 
-# Node 22 via NodeSource
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+# Node — major pinned via NodeSource setup script; minor/patch tracks
+# whatever NodeSource ships for that major (their releases are stable).
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Deno
-RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
+# Deno — pinned via `sh -s v<version>` arg the installer accepts.
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s "v${DENO_VERSION}"
 
-# Python 3 + uv (python3 may already be present; uv is not)
+# Python 3 + uv (python3 may already be present; uv is not).
+# Install uv from the GitHub release tarball directly — astral's install.sh
+# hardcodes APP_VERSION to whatever's current at fetch time and ignores any
+# UV_VERSION env var, so it can't be used for pinning. The tarball URL IS
+# version-pinnable.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-venv \
     && rm -rf /var/lib/apt/lists/*
-RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+RUN curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
+    | tar -xz -C /usr/local/bin --strip-components=1 \
+        uv-x86_64-unknown-linux-gnu/uv \
+        uv-x86_64-unknown-linux-gnu/uvx
 
-# LLM CLIs & Tools
-RUN npm install -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex promptfoo
+# LLM CLIs & Tools — each npm package pinned to its exact version. Bump
+# the ARG above to upgrade. promptfoo and openai/codex are less impactful
+# (we don't currently script against them); claude-code and gemini-cli
+# are load-bearing for the swarm.
+RUN npm install -g \
+    "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+    "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
+    "@openai/codex@${OPENAI_CODEX_VERSION}" \
+    "promptfoo@${PROMPTFOO_VERSION}"
 
 # Fix gemini-cli's missing vendored ripgrep — the npm package omits the
 # binary, so symlink the system rg (already installed earlier in this

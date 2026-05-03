@@ -224,11 +224,36 @@ The disk *is* the coordinator's memory across invocations: worktrees, branches, 
 
 ## Known Limitations
 
-<!-- Both pre-existing limitations resolved this session:
-     - Worker parameterization → WORKER_CMD/WORKER_MODEL plumbed through
-     - Queued protocol → .swarm/tasks/{inbox,processing,done}/ with atomic
-       mv claims and structured outcome JSON; legacy .agent-task.md still
-       works for backward compat. -->
+- ripgrep symlink (host) survives gemini-cli upgrades only if you re-run `setup.sh`. The Dockerfile applies the same fix at image-build time, so workers are immune.
+
+## Reproducible Builds
+
+The `Dockerfile` pins all upstream-version-sensitive tools via `ARG`-driven version strings near the top:
+
+| ARG | Default | Notes |
+|---|---|---|
+| `NODE_MAJOR` | `22` | Major only — NodeSource ships stable patches inside a major. |
+| `CLAUDE_CODE_VERSION` | `2.1.126` | Bump after testing — claude-code minor releases occasionally rename CLI flags. |
+| `GEMINI_CLI_VERSION` | `0.40.1` | Bump cautiously — gemini-cli's tool-call protocol has changed across versions. |
+| `OPENAI_CODEX_VERSION` | `0.128.0` | Less load-bearing — we don't currently script against it. |
+| `PROMPTFOO_VERSION` | `0.121.9` | Same. |
+| `DENO_VERSION` | `2.7.14` | Pinned via positional arg to `deno.land/install.sh`. |
+| `UV_VERSION` | `0.11.8` | Pinned via direct GitHub release tarball (astral's `install.sh` ignores `UV_VERSION` env, so we bypass it). |
+
+Apt-managed tools (Java, ripgrep, gh, docker-cli) are intentionally NOT pinned to dpkg version strings — too fragile for a personal sandbox. Major versions are still pinned via package selection (`openjdk-21`, `setup_22.x`).
+
+**Upgrade workflow:**
+```bash
+# Find the current latest of any pinned tool
+npm view @anthropic-ai/claude-code version
+curl -s https://api.github.com/repos/astral-sh/uv/releases/latest | jq -r .tag_name
+
+# Bump the ARG in Dockerfile, OR override at build time:
+docker build --build-arg CLAUDE_CODE_VERSION=2.2.0 -t llm-sandbox:latest .
+
+# Test the e2e suite to confirm nothing regressed:
+./test-e2e-swarm.sh
+```
 
 - `gemini-3-flash-preview` (and possibly other preview models) hit a server-side `400 INVALID_ARGUMENT` on multi-tool-call sequences — which is exactly the coordinator's workload. Stick to `gemini-2.5-flash` (the default) until Google fixes the preview tier.
 - ripgrep symlink (host) survives gemini-cli upgrades only if you re-run `setup.sh`. Add to your shell rc or a post-`npm-i` hook if you upgrade often.
