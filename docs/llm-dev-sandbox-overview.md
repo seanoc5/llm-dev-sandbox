@@ -56,19 +56,49 @@ Generalized launcher: `sandbox.sh <project-dir> <agent> [extra-args]`
 
 Creates `tmux` session `llm-<basename-of-cwd>` if missing, opens window 1 as `coordinator`, and launches the configured coordinator command in headless print mode (`-p`) with the initial prompt and the system prompt from `COORDINATOR_SYSTEM_PROMPT.md`.
 
-Env vars:
+#### Session reuse: detect-dead-coordinator
 
-| Variable             | Default                         | Notes                                                          |
-|----------------------|---------------------------------|----------------------------------------------------------------|
-| `COORDINATOR_CMD`    | `gemini`                        | `gemini`, `claude`, or any custom CLI                          |
-| `COORDINATOR_MODEL`  | `gemini-3-flash`                | Only consumed when `COORDINATOR_CMD=gemini`                    |
-| `NON_INTERACTIVE`    | `0`                             | When `1`, skip auto-attach (used by tests)                     |
+When the session already exists, `llm-start.sh` inspects the coordinator pane's current command (`tmux list-panes -F '#{pane_current_command}'`) and decides:
 
-When `COORDINATOR_CMD=claude`:
+- **Idle pane** (bash/zsh/sh) → previous coordinator already exited. **Reuses the existing window** and sends the new prompt into it. Same scrollback, no need to kill anything.
+- **Busy pane** (node/claude/etc.) → coordinator is mid-run. Doesn't disturb; just attaches.
+- **No session** → creates fresh.
 
-- `ANTHROPIC_API_KEY` is **stripped from the launched coordinator's env** (`env -u ANTHROPIC_API_KEY claude …`). This forces use of the Claude Max OAuth session stored in `~/.claude/`. A warning is printed if the variable was set, so you don't silently start billing your API account when you intended to use the Max plan.
+This means you can re-invoke `llm-start.sh` repeatedly with new prompts without thinking about state cleanup.
+
+#### Env vars
+
+| Variable                  | Default            | Notes                                                                                            |
+|---------------------------|--------------------|--------------------------------------------------------------------------------------------------|
+| `COORDINATOR_CMD`         | `gemini`           | `gemini`, `claude`, or any custom CLI                                                            |
+| `COORDINATOR_MODEL`       | `gemini-2.5-flash` | Only consumed when `COORDINATOR_CMD=gemini`. Stable; `gemini-3-flash-preview` is broken on multi-tool sequences (server-side INVALID_ARGUMENT). |
+| `COORDINATOR_VERBOSE`     | `0`                | When `1` and using gemini: swaps `-p` for `-i` (`--prompt-interactive`) so tool calls are visible live in the pane. Agent stays alive — exit with `/quit`. claude is unaffected (its `-p` already streams). |
+| `COORDINATOR_USE_API_KEY` | `0`                | When `1` and using claude: keeps `ANTHROPIC_API_KEY` in the agent's env (bills the API account). Default strips it so Claude Max OAuth is used. |
+| `NON_INTERACTIVE`         | `0`                | When `1`, skip auto-attach (used by tests)                                                       |
+
+#### Auto-discovery
+
+- **`GEMINI_API_KEY`**: when not in environment, walks `$PWD/.env` → `~/.gemini/.env` → `llm-dev-sandbox/.env` → `/opt/work/sysadmin/.env` and sources the first match. Propagated into the tmux session env via `tmux new-session -e` so the coordinator pane inherits it without a per-project `.env` copy.
+- **Claude OAuth**: just works via the mounted `~/.claude/` config — no env vars needed. If `ANTHROPIC_API_KEY` *is* set, a warning is printed and the variable is stripped from the coordinator's env (override with `COORDINATOR_USE_API_KEY=1` to bill the API instead of the Max plan).
+
+#### Coordinator command construction (claude path)
+
 - The system prompt is injected via `--append-system-prompt "$(cat $SYSTEM_PROMPT_FILE)"` (claude-code's equivalent of gemini's `GEMINI_SYSTEM_MD`).
 - `--dangerously-skip-permissions` is passed (matches gemini's `--yolo` semantics for autonomous operation).
+
+### `setup.sh` — Host-side post-install setup
+
+Idempotent script that fixes one known host-side issue: the npm-published `@google/gemini-cli` package omits its bundled ripgrep binary, but gemini's runtime still probes for it at `<pkg>/bundle/vendor/ripgrep/rg-<plat>-<arch>` and logs `Ripgrep is not available. Falling back to GrepTool.` when missing. `setup.sh` symlinks the system's `/usr/bin/rg` into the path gemini expects.
+
+Run once after install, and again after any `npm i -g @google/gemini-cli` upgrade. The Dockerfile applies the equivalent fix at image-build time, so workers don't need this.
+
+### `coordinator-error-tail.sh` — Surface gemini API errors in the pane
+
+Called automatically by `llm-start.sh` immediately after every gemini invocation. Checks for `/tmp/gemini-*-error-*.json` files modified in the last minute and decodes the nested `.error.message` (gemini's API errors are double-encoded JSON) into the pane.
+
+Without this, gemini-cli truncates server-side errors to `Operation cancelled.[ERROR] Operation cancelled.` while writing the real cause to `/tmp` — users had to know to check there. With it, the actual error (e.g., `INVALID_ARGUMENT: Please ensure that function response turn comes immediately after a function call turn.`) is visible in the same pane.
+
+No-op for the claude path: claude's `-p` already streams errors and tool calls directly.
 
 ### `worker-listener.sh` — Inbox for worker agents
 
@@ -101,7 +131,7 @@ Spins up `/tmp/swarm-e2e-<epoch>/main-repo` as a fresh git repo, copies the proj
 2. Spawn a worker listener in each via `tmux new-window`.
 3. Drop `.agent-task.md` in each instructing the worker to write `alpha-success.txt` / `beta-success.txt`.
 
-Then polls those marker files for up to 90 seconds, with stuck-detection (kills the session if the coordinator pane stops changing for 15s) and error detection (`grep -iE 'error|exception|missing API key|...'`).
+Then polls those marker files for up to 90 seconds, with stuck-detection (kills the session if the coordinator pane stops changing for 60s) and error detection (`grep -iE 'error|exception|missing API key|...'`).
 
 Set `KEEP_ALIVE=1` to leave the tmux session running on success/timeout for inspection.
 
@@ -134,7 +164,8 @@ The disk *is* the coordinator's memory across invocations: worktrees, branches, 
 
 - Workers are hard-coded to `claude`; see `todo/TODO.md` for parameterization plan.
 - Worker inbox is a single polled file (`.agent-task.md`) with no locking or structured ack — fine for 1 coordinator + 1 worker per worktree, but a 2nd dispatch during execution races. Queued-protocol redesign also in `todo/TODO.md`.
-- `GEMINI_API_KEY` is now auto-discovered from `$PWD/.env` → `~/.gemini/.env` → `llm-dev-sandbox/.env` → `/opt/work/sysadmin/.env` by `llm-start.sh`. Claude uses OAuth at `~/.claude/`.
+- `gemini-3-flash-preview` (and possibly other preview models) hit a server-side `400 INVALID_ARGUMENT` on multi-tool-call sequences — which is exactly the coordinator's workload. Stick to `gemini-2.5-flash` (the default) until Google fixes the preview tier.
+- ripgrep symlink (host) survives gemini-cli upgrades only if you re-run `setup.sh`. Add to your shell rc or a post-`npm-i` hook if you upgrade often.
 
 ## Related Files
 

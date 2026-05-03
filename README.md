@@ -32,7 +32,12 @@ For deep-dives into specific topics, please refer to the reference documentation
 git clone git@github.com:seanoc5/llm-dev-sandbox.git
 cd llm-dev-sandbox
 docker build -t llm-sandbox:latest .
+
+# One-time host-side setup (idempotent; re-run after gemini-cli upgrades)
+./setup.sh
 ```
+
+`setup.sh` symlinks the system `rg` into the path `@google/gemini-cli` looks for (the npm package omits its bundled binary). Without it gemini logs `Ripgrep is not available. Falling back to GrepTool.` on every run and uses a slower built-in matcher.
 
 ### 3. Run Autonomous Swarm (Recommended)
 Let the coordinator triage your backlog and provision worker agents.
@@ -42,9 +47,24 @@ Let the coordinator triage your backlog and provision worker agents.
 cd /opt/work/myproject
 
 # Bootstrap the coordinator (gemini default; COORDINATOR_CMD=claude to use Claude Max)
-/opt/work/sysadmin/llm-dev-sandbox/llm-start.sh
+/opt/work/sysadmin/llm-dev-sandbox/llm-start.sh "Optional initial prompt; default: run startup checklist"
 ```
 This creates a dedicated `tmux` session, runs the coordinator in Window 1 with the prompt you supplied (default: survey GitHub issues + provision workers), and spawns isolated Claude worker agents in dockerized git worktrees, one per dispatched issue.
+
+**Common env-var combinations:**
+
+```bash
+# Watch gemini work live (interactive UI in coordinator pane; exit with /quit)
+COORDINATOR_VERBOSE=1 ./llm-start.sh "..."
+
+# Use Claude Max instead of gemini (strips ANTHROPIC_API_KEY so OAuth is used)
+COORDINATOR_CMD=claude ./llm-start.sh "..."
+
+# Override the gemini model (e.g., A/B-test the preview tier)
+COORDINATOR_MODEL=gemini-3-flash-preview ./llm-start.sh "..."
+```
+
+Full env-var reference in [`docs/llm-dev-sandbox-overview.md`](./docs/llm-dev-sandbox-overview.md#env-vars).
 
 #### How the coordinator works
 
