@@ -20,6 +20,7 @@ A persistent, local-first sandbox for running autonomous LLM agents (Claude Code
   - [worker-listener.sh — Queue watcher for worker agents](#worker-listenersh--queue-watcher-for-worker-agents)
   - [prompts/coordinator.md — Coordinator's brain](#promptscoordinatormd--coordinators-brain)
   - [test-shape-swarm.sh — Non-LLM shape test](#test-shape-swarmsh--non-llm-shape-test-for-the-queue-protocol)
+  - [test-shape-helpers.sh — Non-LLM shape test for triage helpers](#test-shape-helperssh--non-llm-shape-test-for-triage-helpers)
   - [test-e2e-swarm.sh — Local end-to-end test (with real LLM)](#test-e2e-swarmsh--local-end-to-end-test-with-real-llm)
 - [End-to-End Flow (Real Use)](#end-to-end-flow-real-use)
 - [Coordinator Trade-offs](#coordinator-trade-offs)
@@ -363,6 +364,16 @@ Covers:
 - `.tmp.*` exclusion: in-flight atomic-write filenames must not be claimed
 
 Runs in seconds. Pair with `test-e2e-swarm.sh` for full claude/gemini path coverage when you have auth + want to validate the LLM end too. Use `KEEP=1` to retain the temp dir for inspection.
+
+### `test-shape-helpers.sh` — Non-LLM shape test for triage helpers
+
+Deterministic coverage for `requeue.sh` and `kill-worktree.sh` — the two destructive/critical helpers in the triage workflow. Sets up a fixture git repo + worktree on issue #99, then exercises both scripts across their main paths.
+
+Covers:
+- `requeue.sh`: numeric-issue arg vs path arg, stdin brief vs file brief, missing-worktree error, missing-brief-file error, no `.tmp.*` leaks on failure
+- `kill-worktree.sh`: worktree+branch removal, `Worktree state: N commit(s) ahead, M uncommitted` reporting, idempotent re-runs on missing pieces
+
+Runs in seconds. No LLM, no tmux, no network. Use `KEEP=1` to retain the temp dir for inspection.
 
 ### `test-e2e-swarm.sh` — Local end-to-end test (with real LLM)
 
