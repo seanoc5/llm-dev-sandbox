@@ -268,11 +268,62 @@ grep -qE 'Failed: 1' "$TEST_DIR/sweep-5.log" || red "expected 'Failed: 1' in sum
     || red "marker should NOT be written when hook fails"
 green "failed hook → exit non-zero, no marker, summary reports failure"
 
+# ───────────────── coordinator-watch.sh + sweep integration ─────────────────
+
+heading "Test 14: coordinator-watch.sh POST_OUTCOMES=1 invokes sweep on event"
+# Stage a fresh outcome in a sibling worktree (where sweep looks)
+mkdir -p "$TEST_DIR/wt-issue-77/.swarm/tasks/done"
+echo '{"task_id":"t77","outcome":"ok"}' > "$TEST_DIR/wt-issue-77/.swarm/tasks/done/t77.ok.json"
+
+# Custom hook records each call
+INTEGRATION_HOOK="$TEST_DIR/bin/integration-hook.sh"
+cat > "$INTEGRATION_HOOK" <<EOF
+#!/usr/bin/env bash
+echo "INTEGRATION-HOOK: \$1 \$2" >> "$TEST_DIR/integration-hook.log"
+EOF
+chmod +x "$INTEGRATION_HOOK"
+
+# Trigger event needs to land where coordinator-watch.sh's find can see it
+# (under PROJECT_DIR). The sweep then independently scans sibling worktrees.
+mkdir -p "$PROJECT_DIR/.swarm/tasks/done"
+
+# Start watch with POST_OUTCOMES=1; DRY_RUN=1 keeps wake from invoking real
+# llm-start, but POST_OUTCOMES path is gated separately on DRY_RUN — check
+# watch's logic: posting in DRY_RUN logs '[DRY] would: ...' instead.
+cd "$PROJECT_DIR"
+DRY_RUN=0 ONCE=1 POLL_SECS=1 \
+    POST_OUTCOMES=1 OUTCOME_HOOK="$INTEGRATION_HOOK" \
+    LLM_START="$FAKE_LLM_START" \
+    "$WATCH" "$PROJECT_DIR" > "$TEST_DIR/watch-integration.log" 2>&1 &
+INT_WATCH_PID=$!
+
+# Baseline scan
+sleep 1.5
+
+# Drop NEW trigger event under PROJECT_DIR
+echo '{"task_id":"trigger","outcome":"ok"}' > "$PROJECT_DIR/.swarm/tasks/done/trigger.ok.json"
+
+# Wait up to 10s for ONCE=1 exit
+for ((i=0; i<20; i++)); do
+    if ! kill -0 "$INT_WATCH_PID" 2>/dev/null; then break; fi
+    sleep 0.5
+done
+wait "$INT_WATCH_PID" 2>/dev/null || true
+
+grep -q 'sweep: posting outcomes' "$TEST_DIR/watch-integration.log" \
+    || red "expected 'sweep: posting outcomes' line; got: $(cat $TEST_DIR/watch-integration.log)"
+grep -q 'INTEGRATION-HOOK:.*wt-issue-77.*t77.ok.json' "$TEST_DIR/integration-hook.log" \
+    || red "integration hook not called for t77; got: $(cat $TEST_DIR/integration-hook.log 2>/dev/null || echo none)"
+[ -f "$TEST_DIR/wt-issue-77/.swarm/tasks/done/t77.ok.json.posted" ] \
+    || red ".posted marker missing — sweep should have written it"
+green "POST_OUTCOMES=1 fires sweep on event; hook called; .posted marker written"
+
 # ────────────────────────── Done ──────────────────────────
 
 heading "All shape-orchestration tests passed"
 echo "  provision-worker.sh:     worktree+branch+brief, policy embedding, idempotent re-run"
-echo "  coordinator-watch.sh:    polling backend detects new .ok.json, error on missing dir"
+echo "  coordinator-watch.sh:    polling backend detects .ok.json; error on missing dir;"
+echo "                           POST_OUTCOMES=1 invokes sweep with custom hook"
 echo "  sandbox-worktrees.sh:    list mode, non-git error, -t-without-TMUX error"
 echo "  sweep-swarm-outcomes.sh: default hook, .posted idempotency, SWEEP_FORCE, custom hook, hook failure"
 yellow "Run with KEEP=1 to leave $TEST_DIR for inspection."

@@ -25,6 +25,14 @@
 #   WAKE_PROMPT=<text>      Prompt sent to the coordinator on wake.
 #   POLL_SECS=2             Polling interval (used only in polling-mode
 #                           fallback when inotifywait is unavailable).
+#   POST_OUTCOMES=0         Set to 1 to also run sweep-swarm-outcomes.sh
+#                           on each detected outcome. Posting is naturally
+#                           idempotent via .posted markers, so this fires
+#                           outside the wake-debounce window — every
+#                           outcome gets audit coverage even when wakes
+#                           are coalesced. Honors $OUTCOME_HOOK; falls
+#                           back to dry-run stub if unset.
+#   SWEEP=<path>            Override path to sweep-swarm-outcomes.sh.
 #
 # Watch backend (auto-detected):
 #   - inotifywait (preferred): instant response. Install with:
@@ -42,10 +50,15 @@ ONCE="${ONCE:-0}"
 LLM_START="${LLM_START:-/opt/work/sysadmin/llm-dev-sandbox/llm-start.sh}"
 WAKE_PROMPT="${WAKE_PROMPT:-Worker(s) just finished. Triage their outcome JSONs in worktrees/.swarm/tasks/done/ and decide next actions. Do NOT dispatch new workers unless the user asked you to.}"
 POLL_SECS="${POLL_SECS:-2}"
+POST_OUTCOMES="${POST_OUTCOMES:-0}"
+SWEEP="${SWEEP:-/opt/work/sysadmin/llm-dev-sandbox/scripts/sweep-swarm-outcomes.sh}"
 
 # Validation
 [ -d "$PROJECT_DIR" ] || { echo "ERROR: not a directory: $PROJECT_DIR" >&2; exit 1; }
 [ -x "$LLM_START" ]   || { echo "ERROR: llm-start.sh not executable: $LLM_START" >&2; exit 1; }
+if [ "$POST_OUTCOMES" = "1" ]; then
+    [ -x "$SWEEP" ] || { echo "ERROR: sweep script not executable: $SWEEP" >&2; exit 1; }
+fi
 
 # Pick a backend
 BACKEND="poll"
@@ -61,6 +74,7 @@ backend:       $BACKEND$([ "$BACKEND" = "poll" ] && echo " (install inotify-tool
 debounce:      ${DEBOUNCE_SECS}s
 poll interval: ${POLL_SECS}s$([ "$BACKEND" = "inotify" ] && echo " (unused in inotify mode)")
 llm-start.sh:  $LLM_START
+post-outcomes: $POST_OUTCOMES$([ "$POST_OUTCOMES" = "1" ] && echo " (sweep: $SWEEP, hook: ${OUTCOME_HOOK:-default dry-run stub})")
 dry-run:       $DRY_RUN
 once:          $ONCE
 
@@ -77,6 +91,19 @@ on_outcome() {
     local path="$1"
     local now
     now=$(date +%s)
+
+    # Audit posting fires for EVERY outcome (not gated by wake-debounce).
+    # The sweep is idempotent via .posted markers, so repeated calls are
+    # cheap, and we don't want auditing to be coalesced — every finished
+    # task should get its comment posted.
+    if [ "$POST_OUTCOMES" = "1" ]; then
+        if [ "$DRY_RUN" = "1" ]; then
+            echo "[$(date +%T)] [DRY] would: $SWEEP $PROJECT_DIR"
+        else
+            echo "[$(date +%T)] sweep: posting outcomes…"
+            "$SWEEP" "$PROJECT_DIR" || echo "[$(date +%T)] WARN: sweep returned non-zero (continuing watch)"
+        fi
+    fi
 
     if [ $((now - LAST_WAKE)) -lt "$DEBOUNCE_SECS" ]; then
         echo "[$(date +%T)] outcome: $path — within debounce window (${DEBOUNCE_SECS}s), skipping wake"

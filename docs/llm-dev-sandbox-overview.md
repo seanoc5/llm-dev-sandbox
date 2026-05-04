@@ -273,8 +273,20 @@ ONCE=1 coordinator-watch.sh
 | `LLM_START` | `/opt/work/sysadmin/llm-dev-sandbox/llm-start.sh` | Override path |
 | `WAKE_PROMPT` | (status-triage prompt; read-only) | What the coordinator does when woken |
 | `POLL_SECS` | `2` | Polling interval (polling backend only) |
+| `POST_OUTCOMES` | `0` | Set to `1` to also run `sweep-swarm-outcomes.sh` on each detected outcome. Honors `$OUTCOME_HOOK`. Fires outside the wake-debounce window so every outcome gets audit coverage even when wakes are coalesced. |
+| `SWEEP` | `/opt/work/sysadmin/llm-dev-sandbox/scripts/sweep-swarm-outcomes.sh` | Override sweep path |
 
 **Anti-runaway:** the default `WAKE_PROMPT` is read-only ("triage … decide next actions … do NOT dispatch new workers unless the user asked you to") and `DEBOUNCE_SECS` ensures back-to-back finishes don't N+1-loop the coordinator. Override `WAKE_PROMPT` if you want to hand more autonomy to the watcher.
+
+**Combined audit + wake (recommended for unattended runs):**
+
+```bash
+POST_OUTCOMES=1 \
+OUTCOME_HOOK=/opt/work/myproject/scripts/post-swarm-outcome.sh \
+    coordinator-watch.sh /opt/work/myproject
+```
+
+This single supervisor process watches `done/*.json` events, posts the audit comment via your hook, and wakes the coordinator. Posting fires for every outcome (idempotent via `.posted` markers); wakes are coalesced via `DEBOUNCE_SECS`. Survives across coordinator one-shot invocations.
 
 ### `sweep-swarm-outcomes.sh` — Audit-trail post-processing
 
