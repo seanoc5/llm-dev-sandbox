@@ -107,6 +107,44 @@ A starter is in [`examples/swarm-policy.md.example`](../examples/swarm-policy.md
 
 If the file is absent, the coordinator omits the Guardrails section entirely (no fabricated rules).
 
+### `coordinator-watch.sh` — Event-driven coordinator wake-ups
+
+Long-running daemon that watches every worker's `.swarm/tasks/done/` directory under a project. When a new outcome JSON appears (i.e. a worker finished a task), wakes the coordinator via `llm-start.sh` so it can triage / re-dispatch / merge / etc. Together with the queued protocol, this delivers the **event-driven coordinator** option from the README's "Automating the loop" section without rewriting the agent itself.
+
+```bash
+# default — watches $PWD, debounces 30s, blocks on Ctrl-C
+coordinator-watch.sh
+
+# in another project
+coordinator-watch.sh /opt/work/myproject
+
+# preview without actually waking the coordinator
+DRY_RUN=1 coordinator-watch.sh
+
+# exit after the first wake (useful for testing)
+ONCE=1 coordinator-watch.sh
+```
+
+**Backends (auto-detected):**
+
+| Backend | Latency | Setup |
+|---|---|---|
+| `inotifywait` (preferred) | instant | `sudo apt install inotify-tools` (and bump `fs.inotify.max_user_watches` for large repos) |
+| polling `find` (fallback) | `POLL_SECS=2` (default) | none — works out of the box |
+
+**Env vars:**
+
+| Var | Default | Notes |
+|---|---|---|
+| `DEBOUNCE_SECS` | `30` | Coalesce N events into 1 wake when many workers finish near-simultaneously |
+| `DRY_RUN` | `0` | Log triggers without invoking llm-start.sh |
+| `ONCE` | `0` | Exit after first wake — for smoke-tests |
+| `LLM_START` | `/opt/work/sysadmin/llm-dev-sandbox/llm-start.sh` | Override path |
+| `WAKE_PROMPT` | (status-triage prompt; read-only) | What the coordinator does when woken |
+| `POLL_SECS` | `2` | Polling interval (polling backend only) |
+
+**Anti-runaway:** the default `WAKE_PROMPT` is read-only ("triage … decide next actions … do NOT dispatch new workers unless the user asked you to") and `DEBOUNCE_SECS` ensures back-to-back finishes don't N+1-loop the coordinator. Override `WAKE_PROMPT` if you want to hand more autonomy to the watcher.
+
 ### `coordinator-error-tail.sh` — Surface gemini API errors in the pane
 
 Called automatically by `llm-start.sh` immediately after every gemini invocation. Checks for `/tmp/gemini-*-error-*.json` files modified in the last minute and decodes the nested `.error.message` (gemini's API errors are double-encoded JSON) into the pane.
