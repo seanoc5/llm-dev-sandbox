@@ -13,12 +13,21 @@ SYSTEM_PROMPT_FILE="/opt/work/sysadmin/llm-dev-sandbox/prompts/coordinator.md"
 INITIAL_PROMPT="${1:-Execute the Initial Startup Checklist.}"
 
 # Allow overriding the coordinator command and model
-COORD_CMD="${COORDINATOR_CMD:-gemini}"
-# gemini-2.5-flash is stable; gemini-3-flash-preview returns INVALID_ARGUMENT
-# ("Please ensure that function response turn comes immediately after a function
-# call turn") on multi-step tool sequences, which is the coordinator's whole
-# job. Override with COORDINATOR_MODEL=gemini-3-flash-preview when re-testing.
-COORD_MODEL="${COORDINATOR_MODEL:-gemini-2.5-flash}"
+COORD_CMD="${COORDINATOR_CMD:-claude}"
+# Default model depends on which coordinator is running:
+#   claude → claude-opus-4-7[1m] (Opus 4.7 with 1M context — note brackets
+#     are part of the literal model id; must be single-quoted at the shell
+#     to suppress glob expansion).
+#   gemini → gemini-2.5-flash (stable). gemini-3-flash-preview returns
+#     INVALID_ARGUMENT on multi-step tool sequences (which is the
+#     coordinator's whole job), so it's not a viable default.
+# Override either via COORDINATOR_MODEL=<id>.
+case "$COORD_CMD" in
+    claude) COORD_MODEL_DEFAULT='claude-opus-4-7[1m]' ;;
+    gemini) COORD_MODEL_DEFAULT='gemini-2.5-flash' ;;
+    *)      COORD_MODEL_DEFAULT='' ;;
+esac
+COORD_MODEL="${COORDINATOR_MODEL:-$COORD_MODEL_DEFAULT}"
 
 # Auto-discover GEMINI_API_KEY when running gemini coordinator. Gemini CLI only
 # auto-loads .env from CWD/walks up to $HOME and ~/.gemini/.env — it never
@@ -133,7 +142,12 @@ if ! $session_existed || $coordinator_idle; then
         fi
         # --append-system-prompt is claude-code's equivalent of GEMINI_SYSTEM_MD.
         # --dangerously-skip-permissions matches gemini --yolo for autonomous ops.
-        BASE_CMD="${ENV_PREFIX}claude --append-system-prompt \"\$(cat '$SYSTEM_PROMPT_FILE')\" --dangerously-skip-permissions"
+        # --model only when COORD_MODEL is set. The single quotes around
+        # $COORD_MODEL are literal characters embedded in BASE_CMD — needed
+        # so the default 'claude-opus-4-7[1m]' (which contains bash glob
+        # chars [ and ]) survives shell parsing when BASE_CMD is executed.
+        # shellcheck disable=SC2016  # $COORD_MODEL is in double-quoted context, so it does expand
+        BASE_CMD="${ENV_PREFIX}claude ${COORD_MODEL:+--model '$COORD_MODEL'} --append-system-prompt \"\$(cat '$SYSTEM_PROMPT_FILE')\" --dangerously-skip-permissions"
     else
         BASE_CMD="$COORD_CMD"
     fi
