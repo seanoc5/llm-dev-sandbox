@@ -30,8 +30,11 @@ TEST_DIR=$(mktemp -d -t shape-test-XXXXXX)
 cleanup() {
     [ -n "${LISTENER_PID:-}" ] && kill "$LISTENER_PID" 2>/dev/null || true
     [ -n "${LISTENER_PID:-}" ] && wait "$LISTENER_PID" 2>/dev/null || true
-    [ "${KEEP:-0}" = "1" ] || rm -rf "$TEST_DIR"
-    [ "${KEEP:-0}" = "1" ] && yellow "KEEP=1: leaving $TEST_DIR for inspection"
+    if [ "${KEEP:-0}" = "1" ]; then
+        yellow "KEEP=1: leaving $TEST_DIR for inspection"
+    else
+        rm -rf "$TEST_DIR"
+    fi
 }
 trap cleanup EXIT
 

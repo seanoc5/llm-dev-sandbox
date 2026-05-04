@@ -90,7 +90,8 @@ claim_next_task() {
                   | sort | head -1)
     if [ -n "$next_inbox" ]; then
         TASK_ID=$(basename "$next_inbox" .md)
-        local target="$PROCESSING/$(basename "$next_inbox")"
+        local target
+        target="$PROCESSING/$(basename "$next_inbox")"
         # Atomic claim. If another process beat us to it, mv fails — try again.
         if mv "$next_inbox" "$target" 2>/dev/null; then
             TASK_PATH="$target"

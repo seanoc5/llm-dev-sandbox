@@ -33,8 +33,10 @@ if [ "$COORD_CMD" = "gemini" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
         "/opt/work/sysadmin/llm-dev-sandbox/.env" \
         "/opt/work/sysadmin/.env"; do
         if [ -f "$_candidate" ] && grep -q '^GEMINI_API_KEY=' "$_candidate" 2>/dev/null; then
-            # shellcheck disable=SC1090
-            set -a; . "$_candidate"; set +a
+            set -a
+            # shellcheck source=/dev/null
+            . "$_candidate"
+            set +a
             if [ -n "${GEMINI_API_KEY:-}" ]; then
                 GEMINI_ENV_SOURCED="$_candidate"
                 break

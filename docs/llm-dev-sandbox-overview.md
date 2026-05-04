@@ -21,6 +21,7 @@ A persistent, local-first sandbox for running autonomous LLM agents (Claude Code
   - [prompts/coordinator.md — Coordinator's brain](#promptscoordinatormd--coordinators-brain)
   - [test-shape-swarm.sh — Non-LLM shape test](#test-shape-swarmsh--non-llm-shape-test-for-the-queue-protocol)
   - [test-shape-helpers.sh — Non-LLM shape test for triage helpers](#test-shape-helperssh--non-llm-shape-test-for-triage-helpers)
+  - [test-shape-orchestration.sh — Non-LLM shape test for provision/watch/list](#test-shape-orchestrationsh--non-llm-shape-test-for-provisionwatchlist)
   - [test-e2e-swarm.sh — Local end-to-end test (with real LLM)](#test-e2e-swarmsh--local-end-to-end-test-with-real-llm)
 - [End-to-End Flow (Real Use)](#end-to-end-flow-real-use)
 - [Coordinator Trade-offs](#coordinator-trade-offs)
@@ -374,6 +375,16 @@ Covers:
 - `kill-worktree.sh`: worktree+branch removal, `Worktree state: N commit(s) ahead, M uncommitted` reporting, idempotent re-runs on missing pieces
 
 Runs in seconds. No LLM, no tmux, no network. Use `KEEP=1` to retain the temp dir for inspection.
+
+### `test-shape-orchestration.sh` — Non-LLM shape test for provision/watch/list
+
+Deterministic coverage for the three orchestration helpers that don't slot into the worker-listener or triage-helper buckets:
+
+- `provision-worker.sh`: worktree+branch+queue creation, brief assembly with `gh issue view` body, `.swarm-policy.md` embedding, idempotent re-run
+- `coordinator-watch.sh`: polling backend detects a fresh `.ok.json`, would-wake logged in `DRY_RUN` mode, `ONCE=1` exit, missing-project error
+- `sandbox-worktrees.sh`: lists worktrees of a multi-worktree repo, errors on non-git, errors on `-t` outside a tmux session
+
+Stubs `gh` and `tmux` via `PATH` override so no GitHub auth and no live tmux server are needed. Watch test runs `DRY_RUN=1 ONCE=1 POLL_SECS=1` so it never invokes a real `llm-start.sh`. Total runtime ~10s.
 
 ### `test-e2e-swarm.sh` — Local end-to-end test (with real LLM)
 
