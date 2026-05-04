@@ -107,6 +107,54 @@ A starter is in [`examples/swarm-policy.md.example`](../examples/swarm-policy.md
 
 If the file is absent, the coordinator omits the Guardrails section entirely (no fabricated rules).
 
+### OpenBrain MCP integration
+
+Both coordinator backends (claude + gemini) and any worker agents can talk to a local **OpenBrain** MCP server (knowledge graph at `http://127.0.0.1:8100`) via Model Context Protocol. This gives the agents persistent memory tools across invocations:
+
+| MCP tool | What it does |
+|---|---|
+| `capture_thought` | Save a new thought with auto-extracted metadata + embeddings |
+| `list_thoughts` | Retrieve recent thoughts, filter by type/topic/person |
+| `search_thoughts` | Semantic search across captured thoughts |
+| `thought_stats` | Summary stats — totals, top topics |
+
+#### How it's wired
+
+| Where | Config | Mounted into worker container? |
+|---|---|---|
+| **Claude** (host coordinator) | `~/.claude.json` → `mcpServers.open-brain` (already present) | yes — `~/.claude.json` rw-mounted into sandbox |
+| **Claude** (workers in docker) | inherited via the mount | yes |
+| **Gemini** (host coordinator) | `~/.gemini/settings.json` → `mcpServers.open-brain` (added `gemini mcp add open-brain ... -s user -t http --trust`) | yes when present |
+| **Gemini** (workers in docker) | inherited via mount | yes — `~/.gemini` ro-mounted into sandbox if it exists |
+
+Workers reach `http://127.0.0.1:8100` because `sandbox.sh` runs containers with `--network host`, so the container's loopback IS the host's.
+
+#### Setup checklist
+
+```bash
+# 1. OpenBrain server running on host (systemd unit at /opt/openbrain/openbrain.service)
+ss -tln | grep ':8100 '
+
+# 2. Claude already configured? (one-time, already done on this host)
+jq '.mcpServers."open-brain"' ~/.claude.json
+
+# 3. Gemini already configured? (added this session)
+jq '.mcpServers."open-brain"' ~/.gemini/settings.json
+
+# 4. To re-add gemini config from scratch:
+KEY=<openbrain-key>
+gemini mcp add open-brain "http://127.0.0.1:8100?key=$KEY" \
+    -s user -t http --trust \
+    --description "OpenBrain knowledge graph (local)"
+
+# 5. Verify gemini sees it:
+gemini --yolo --skip-trust -p 'List the MCP servers you have access to.'
+```
+
+#### Security note
+
+The MCP key is embedded in the URL query string in both `~/.claude.json` and `~/.gemini/settings.json`. Both files are `chmod 600`-equivalent (owned by user, not world-readable), but anyone with read access to your home dir can extract the key. OpenBrain itself is bound to `0.0.0.0:8100` — verify you're behind a host firewall before treating that key as "local-only".
+
 ### `coordinator-watch.sh` — Event-driven coordinator wake-ups
 
 Long-running daemon that watches every worker's `.swarm/tasks/done/` directory under a project. When a new outcome JSON appears (i.e. a worker finished a task), wakes the coordinator via `llm-start.sh` so it can triage / re-dispatch / merge / etc. Together with the queued protocol, this delivers the **event-driven coordinator** option from the README's "Automating the loop" section without rewriting the agent itself.

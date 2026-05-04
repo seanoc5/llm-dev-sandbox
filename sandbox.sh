@@ -48,6 +48,14 @@ MOUNTS=(
     -v "$HOME/.npm:/home/sandbox/.npm:rw"
 )
 
+# ~/.gemini holds gemini-cli's settings.json (auth + MCP server config).
+# Mount it ro when present so gemini workers inherit the host's MCP servers
+# (e.g. open-brain) without re-configuring per-container. Skipped silently
+# if the dir doesn't exist on the host.
+if [ -d "$HOME/.gemini" ]; then
+    MOUNTS+=(-v "$HOME/.gemini:/home/sandbox/.gemini:ro")
+fi
+
 # --- Git Worktree Support ---
 # Git worktrees use a .git file containing an absolute path pointing to the
 # main repository's .git directory. If this directory is outside PROJECT_DIR,
