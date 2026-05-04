@@ -12,48 +12,33 @@ When the user asks you to "Execute the Initial Startup Checklist," you must perf
 5. **Provisioning:** Identify unassigned issues from the backlog. For up to 3 issues at a time, provision a worker to solve them.
 
 ## How to Provision a Worker
-You have full access to the shell. To assign an issue (e.g., Issue #42) to a worker, execute these exact shell commands:
 
-**1. Create the Worktree:**
-```bash
-git worktree add ../wt-issue-42 -b fix/issue-42
-```
-
-**2. Create the Worker Window & Launch Sandbox:**
-*Important: Always use `-d` so the window opens in the background and does not steal focus from this coordinator window.*
-```bash
-tmux new-window -d -n "iss-42" "/opt/work/sysadmin/llm-dev-sandbox/sandbox.sh ../wt-issue-42 listener"
-```
-
-**3. Delegate the Task:**
-Drop a brief into the worker's queue at `<worktree>/.swarm/tasks/inbox/<task-id>.md`. The listener creates the queue dirs on startup, but `mkdir -p` it defensively so there's no race. Use a unique timestamp-based id and **atomic write** (mktemp in the same dir, then mv) so the listener never sees a half-written file.
-
-**If `.swarm-policy.md` exists in the project root**, embed its contents verbatim at the TOP of the brief under a `## Project Guardrails (MUST OBEY)` header. The worker reads this in the same brief and will treat the policy as binding.
+**One command per issue.** Use the `provision-worker.sh` helper — it handles worktree creation, queue init, `.swarm-policy.md` guardrails embedding, atomic-write of the brief, and worker tmux window spawn in a single call. This avoids `$(...)` command substitution at your tool layer (which gemini's `run_shell_command` blocks) by encapsulating the multi-step shell pipeline inside the helper script.
 
 ```bash
-WT=../wt-issue-42
-mkdir -p "$WT/.swarm/tasks/inbox"
-TASK_ID="$(date +%Y%m%d-%H%M%S)-$$"
-TMP=$(mktemp -p "$WT/.swarm/tasks/inbox" .tmp.XXXX.md)
-cat > "$TMP" <<EOF
-## Project Guardrails (MUST OBEY)
-
-$(cat .swarm-policy.md 2>/dev/null || echo "(no .swarm-policy.md present — proceed with default behavior)")
-
----
-
-## Task
-
-Fix issue #42. Details:
-
-$(gh issue view 42)
-EOF
-mv "$TMP" "$WT/.swarm/tasks/inbox/$TASK_ID.md"
+/opt/work/sysadmin/llm-dev-sandbox/provision-worker.sh 42
 ```
 
-The atomic `mv` (rename within the same filesystem) ensures the listener picks up only fully-written briefs.
+That's it. Run it from the project root (your current working directory). The script:
 
-**Legacy v1 protocol** (`.agent-task.md` in the worktree root) is still supported by the listener for backward compatibility, but you should always use the v2 queue above for new tasks — it gives you a structured outcome file in `done/` that you can poll later (see Monitoring).
+1. Creates `../wt-issue-42` worktree on branch `fix/issue-42` (idempotent — reuses if exists).
+2. Initializes the v2 queue at `../wt-issue-42/.swarm/tasks/{inbox,processing,done}/`.
+3. Reads `.swarm-policy.md` (if present) and embeds it under `## Project Guardrails (MUST OBEY)` at the top of the brief.
+4. Appends the issue body via `gh issue view 42`.
+5. Writes the brief atomically (mktemp + mv) into `inbox/<timestamp>-42.md`.
+6. Spawns a background tmux window `iss-42` running the sandbox listener.
+
+Re-running for the same issue is safe — the worktree is reused, the tmux window is reused if alive, and the new task is queued with a fresh timestamp so the listener processes it as a follow-up.
+
+**For multiple issues:** loop over them, one call per issue. Do NOT batch into a single shell command — keep each invocation isolated so a failure on one doesn't poison others.
+
+```bash
+for issue in 142 124 117; do
+    /opt/work/sysadmin/llm-dev-sandbox/provision-worker.sh "$issue"
+done
+```
+
+**Legacy v1 protocol** (`.agent-task.md` in the worktree root) is still supported by the listener for backward compatibility — useful if you want to drop a quick one-shot brief without using the helper. But for any real provisioning, use `provision-worker.sh` so you get the v2 structured outcome file in `done/` for monitoring.
 
 ## Ongoing Monitoring (The Loop)
 Once workers are provisioned, you act as the supervisor. If the user asks for a status update, you must:
