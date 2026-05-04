@@ -4,7 +4,7 @@ This document outlines the design philosophy and technical architecture of the `
 
 ## The 2026 Pattern: Git Worktree Isolation
 
-As LLMs have reached 1M+ token contexts (e.g., Claude 4.7, Gemini 1.5 Pro), the industry standard for multi-agent development has shifted from complex micro-container orchestration to **Git Worktree Isolation**. 
+As LLMs have reached 1M+ token contexts (e.g., Claude 4.6, Gemini 2.5 Pro), the industry standard for multi-agent development has shifted from complex micro-container orchestration to **Git Worktree Isolation**.
 
 This pattern solves two major problems in multi-agent environments:
 1.  **File Lock Contention:** Agents attempting to edit the same file simultaneously corrupt source code.
@@ -16,9 +16,9 @@ By using Git Worktrees, each agent gets a physically separate clone of the repos
 
 This sandbox supports a fully autonomous architecture managed via `tmux`:
 
-1.  **The Coordinator (Brain):** A dedicated `tmux` session is bootstrapped by `llm-start.sh`, dropping you directly into Gemini CLI (Window 1). Gemini acts as an autonomous project manager. It uses `gh` to read your backlog, plans tasks, and dynamically creates Git worktrees on the fly.
-2.  **The Workers (Hands):** The Coordinator autonomously provisions background `tmux` windows containing isolated Claude Code sandboxes.
-3.  **The Communication:** The Coordinator assigns tasks by dropping highly detailed `.agent-task.md` specs into the worktrees. A background `worker-listener.sh` daemon immediately picks them up and executes them, while the Coordinator monitors their PR output via `gh`.
+1.  **The Coordinator (Brain):** A dedicated `tmux` session is bootstrapped by `llm-start.sh`. Window 1 runs the configured coordinator (`gemini` by default; `COORDINATOR_CMD=claude` switches to Claude Max). The coordinator acts as an autonomous project manager — it uses `gh` to read your backlog, plans tasks, and provisions worker worktrees on the fly via `provision-worker.sh`.
+2.  **The Workers (Hands):** The Coordinator autonomously provisions background `tmux` windows containing isolated worker sandboxes (`claude` by default; `WORKER_CMD=gemini` switches the per-worker agent).
+3.  **The Communication:** The Coordinator drops task briefs into each worktree's `.swarm/tasks/inbox/` (the v2 queue protocol — atomic mktemp+mv writes, structured `done/*.json` outcomes). A background `worker-listener.sh` claims tasks one at a time, dispatches them to the worker LLM, and writes the outcome JSON. Coordinator monitors progress by polling `done/` and reading the worker's PRs via `gh`.
 
 ## Open Source Landscape & Alternatives
 
