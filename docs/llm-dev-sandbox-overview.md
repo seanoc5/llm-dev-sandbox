@@ -2,6 +2,32 @@
 
 A persistent, local-first sandbox for running autonomous LLM agents (Claude Code, Gemini CLI) against your real host services, with safety isolation provided by Docker + git worktrees + tmux. This document is the canonical reference for *how the pieces fit together*; for narrower topics see the other files in `docs/`.
 
+## Contents
+
+- [Why This Exists](#why-this-exists)
+- [Architecture at a Glance](#architecture-at-a-glance)
+- [Components](#components)
+  - [sandbox.sh — Docker wrapper for one agent](#sandboxsh--docker-wrapper-for-one-agent)
+  - [llm-start.sh — Bootstrap a Coordinator session](#llm-startsh--bootstrap-a-coordinator-session)
+  - [kill-worktree.sh — Clean up a worker worktree](#kill-worktreesh--clean-up-a-worker-worktree)
+  - [requeue.sh — Drop a follow-up brief into a worker's queue](#requeuesh--drop-a-follow-up-brief-into-a-workers-queue)
+  - [provision-worker.sh — One-call worker dispatch](#provision-workersh--one-call-worker-dispatch)
+  - [setup.sh — Host-side post-install setup](#setupsh--host-side-post-install-setup)
+  - [.swarm-policy.md — Per-project rules-of-engagement](#swarm-policymd--per-project-rules-of-engagement-optional)
+  - [OpenBrain MCP integration](#openbrain-mcp-integration)
+  - [coordinator-watch.sh — Event-driven coordinator wake-ups](#coordinator-watchsh--event-driven-coordinator-wake-ups)
+  - [coordinator-error-tail.sh — Surface gemini API errors](#coordinator-error-tailsh--surface-gemini-api-errors-in-the-pane)
+  - [worker-listener.sh — Queue watcher for worker agents](#worker-listenersh--queue-watcher-for-worker-agents)
+  - [COORDINATOR_SYSTEM_PROMPT.md — Coordinator's brain](#coordinator_system_promptmd--coordinators-brain)
+  - [test-shape-swarm.sh — Non-LLM shape test](#test-shape-swarmsh--non-llm-shape-test-for-the-queue-protocol)
+  - [test-e2e-swarm.sh — Local end-to-end test (with real LLM)](#test-e2e-swarmsh--local-end-to-end-test-with-real-llm)
+- [End-to-End Flow (Real Use)](#end-to-end-flow-real-use)
+- [Coordinator Trade-offs](#coordinator-trade-offs)
+- [Coordinator Lifecycle (one-shot by design)](#coordinator-lifecycle-one-shot-by-design)
+- [Known Limitations](#known-limitations)
+- [Reproducible Builds](#reproducible-builds)
+- [Related Files](#related-files)
+
 ## Why This Exists
 
 Running autonomous LLM agents directly on your host is risky: a hallucinated `rm -rf` or wrongly-confident `kubectl delete` can ruin your day. This sandbox provides:

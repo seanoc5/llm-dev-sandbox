@@ -11,6 +11,18 @@ By running locally with `--network host`, the agent can interact with your entir
 
 ---
 
+## Contents
+
+- [Documentation Index](#documentation-index)
+- [Quick Start](#quick-start)
+  - [Prerequisites](#1-prerequisites)
+  - [Install](#2-install)
+  - [Run Autonomous Swarm (Recommended)](#3-run-autonomous-swarm-recommended)
+  - [Run Manual Sandbox (Single Agent)](#4-run-manual-sandbox-single-agent)
+- [Features at a glance](#features-at-a-glance)
+
+---
+
 ## 📚 Documentation Index
 
 For deep-dives into specific topics, please refer to the reference documentation:
