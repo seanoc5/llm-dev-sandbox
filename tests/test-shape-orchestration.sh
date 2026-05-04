@@ -108,15 +108,19 @@ green "embeds .swarm-policy.md under 'Project Guardrails' heading"
 
 heading "Test 3: provision-worker.sh idempotent re-run reuses worktree"
 cd "$PROJECT_DIR"
-# TASK_ID has 1-second resolution — sleep so the second brief gets a distinct ID
-sleep 1.1
+# Rapid re-dispatch (within the same second) — collision counter should
+# kick in and append -2 to TASK_ID. No sleep needed.
 "$PROVISION" 99 > "$TEST_DIR/prov-3.log" 2>&1 || red "provision-worker re-run exit non-zero"
 grep -q "worktree already exists — reusing" "$TEST_DIR/prov-3.log" \
     || red "expected 'worktree already exists' message"
 # A second brief should now exist for issue 99
 count=$(ls "$WT"/.swarm/tasks/inbox/*.md | wc -l)
 [ "$count" -ge 2 ] || red "expected ≥2 briefs in inbox after re-run, got $count"
-green "re-run reuses worktree, queues a follow-up brief"
+# Verify at least one of the briefs has the -2 collision-counter suffix
+collision_brief=$(ls "$WT"/.swarm/tasks/inbox/*-99-2.md 2>/dev/null | head -1 || true)
+[ -n "$collision_brief" ] \
+    || red "expected a *-99-2.md collision-suffix brief; got: $(ls $WT/.swarm/tasks/inbox/)"
+green "re-run reuses worktree, queues follow-up with -2 collision suffix"
 
 # ────────────────────────── coordinator-watch.sh ──────────────────────────
 
