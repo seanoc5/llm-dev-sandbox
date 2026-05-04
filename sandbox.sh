@@ -205,14 +205,14 @@ if [[ $# -eq 0 ]]; then
     case "$AGENT" in
         claude)   CMD_ARRAY=("claude" "--dangerously-skip-permissions") ;;
         gemini)   CMD_ARRAY=("gemini" "--yolo") ;;
-        listener) CMD_ARRAY=("$SCRIPT_DIR/worker-listener.sh" "$WORKER_AGENT") ;;
+        listener) CMD_ARRAY=("$SCRIPT_DIR/scripts/worker-listener.sh" "$WORKER_AGENT") ;;
         *)        CMD_ARRAY=("bash" "-i") ;;
     esac
 else
     case "$AGENT" in
         claude)   CMD_ARRAY=("claude" "$@" "--dangerously-skip-permissions") ;;
         gemini)   CMD_ARRAY=("gemini" "$@" "--yolo") ;;
-        listener) CMD_ARRAY=("$SCRIPT_DIR/worker-listener.sh" "$@" "--dangerously-skip-permissions") ;;
+        listener) CMD_ARRAY=("$SCRIPT_DIR/scripts/worker-listener.sh" "$@" "--dangerously-skip-permissions") ;;
         *)        CMD_ARRAY=("bash" "-c" "$*") ;;
     esac
 fi

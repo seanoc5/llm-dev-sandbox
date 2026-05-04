@@ -76,7 +76,7 @@ Free tier and AI Pro plans both hit `generativelanguage.googleapis.com`. Symptom
 Check usage at https://aistudio.google.com/app/apikey (per-key) or https://console.cloud.google.com/apis/api/generativelanguage.googleapis.com/quotas (project-wide). The `coordinator-error-tail.sh` helper decodes recent error files:
 
 ```bash
-/opt/work/sysadmin/llm-dev-sandbox/coordinator-error-tail.sh
+/opt/work/sysadmin/llm-dev-sandbox/scripts/coordinator-error-tail.sh
 ```
 
 ### Gemini API key — get / validate
@@ -144,7 +144,7 @@ The Dockerfile pins specific versions of node, claude-code, gemini-cli, codex, p
 docker build --no-cache -t llm-sandbox:latest .
 ```
 
-After a clean rebuild, also re-run `./setup.sh` on the host (the gemini ripgrep symlink lives in the host npm cache, not the image).
+After a clean rebuild, also re-run `./scripts/setup.sh` on the host (the gemini ripgrep symlink lives in the host npm cache, not the image).
 
 ### Disk space exhausted (worktrees + image layers)
 
@@ -240,7 +240,7 @@ Gemini-CLI's tool layer blocks command substitution as a safety guardrail. The c
 Ripgrep is not available. Falling back to GrepTool.
 ```
 
-The npm `@google/gemini-cli` package ships without its bundled ripgrep binary. Run `./setup.sh` on the host once after install and after every gemini-cli upgrade — it symlinks the system `rg` into the path gemini looks for.
+The npm `@google/gemini-cli` package ships without its bundled ripgrep binary. Run `./scripts/setup.sh` on the host once after install and after every gemini-cli upgrade — it symlinks the system `rg` into the path gemini looks for.
 
 ---
 

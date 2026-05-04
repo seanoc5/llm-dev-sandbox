@@ -46,10 +46,10 @@ cd llm-dev-sandbox
 docker build -t llm-sandbox:latest .
 
 # One-time host-side setup (idempotent; re-run after gemini-cli upgrades)
-./setup.sh
+./scripts/setup.sh
 ```
 
-`setup.sh` symlinks the system `rg` into the path `@google/gemini-cli` looks for (the npm package omits its bundled binary). Without it gemini logs `Ripgrep is not available. Falling back to GrepTool.` on every run and uses a slower built-in matcher.
+`scripts/setup.sh` symlinks the system `rg` into the path `@google/gemini-cli` looks for (the npm package omits its bundled binary). Without it gemini logs `Ripgrep is not available. Falling back to GrepTool.` on every run and uses a slower built-in matcher.
 
 ### 3. Run Autonomous Swarm (Recommended)
 Let the coordinator triage your backlog and provision worker agents.

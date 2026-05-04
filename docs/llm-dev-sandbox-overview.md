@@ -18,7 +18,7 @@ A persistent, local-first sandbox for running autonomous LLM agents (Claude Code
   - [coordinator-watch.sh — Event-driven coordinator wake-ups](#coordinator-watchsh--event-driven-coordinator-wake-ups)
   - [coordinator-error-tail.sh — Surface gemini API errors](#coordinator-error-tailsh--surface-gemini-api-errors-in-the-pane)
   - [worker-listener.sh — Queue watcher for worker agents](#worker-listenersh--queue-watcher-for-worker-agents)
-  - [COORDINATOR_SYSTEM_PROMPT.md — Coordinator's brain](#coordinator_system_promptmd--coordinators-brain)
+  - [prompts/coordinator.md — Coordinator's brain](#promptscoordinatormd--coordinators-brain)
   - [test-shape-swarm.sh — Non-LLM shape test](#test-shape-swarmsh--non-llm-shape-test-for-the-queue-protocol)
   - [test-e2e-swarm.sh — Local end-to-end test (with real LLM)](#test-e2e-swarmsh--local-end-to-end-test-with-real-llm)
 - [End-to-End Flow (Real Use)](#end-to-end-flow-real-use)
@@ -80,7 +80,7 @@ Generalized launcher: `sandbox.sh <project-dir> <agent> [extra-args]`
 
 ### `llm-start.sh` — Bootstrap a Coordinator session
 
-Creates `tmux` session `llm-<basename-of-cwd>` if missing, opens window 1 as `coordinator`, and launches the configured coordinator command in headless print mode (`-p`) with the initial prompt and the system prompt from `COORDINATOR_SYSTEM_PROMPT.md`.
+Creates `tmux` session `llm-<basename-of-cwd>` if missing, opens window 1 as `coordinator`, and launches the configured coordinator command in headless print mode (`-p`) with the initial prompt and the system prompt from `prompts/coordinator.md`.
 
 #### Session reuse: detect-dead-coordinator
 
@@ -148,7 +148,7 @@ provision-worker.sh <issue-number> [project-dir]
 
 #### Why this exists
 
-The coordinator's tool layer (gemini's `run_shell_command`, claude's Bash tool in some configs) **blocks `$(...)` command substitution** as a safety guardrail. The earlier inline-heredoc pattern in `COORDINATOR_SYSTEM_PROMPT.md`:
+The coordinator's tool layer (gemini's `run_shell_command`, claude's Bash tool in some configs) **blocks `$(...)` command substitution** as a safety guardrail. The earlier inline-heredoc pattern in `prompts/coordinator.md`:
 
 ```bash
 cat > $WT/.swarm/tasks/inbox/$TASK_ID.md <<EOF
@@ -339,7 +339,7 @@ The listener checks v2 inbox first, falls back to v1. Both can be in use simulta
 
 This decouples the coordinator from the workers: the coordinator just drops a markdown file into the worktree and the worker picks it up asynchronously.
 
-### `COORDINATOR_SYSTEM_PROMPT.md` — Coordinator's brain
+### `prompts/coordinator.md` — Coordinator's brain
 
 Defines the coordinator's startup checklist (read `.swarm-policy.md` → `git status` → `gh issue list` → backlog grooming → provision up to 3 workers) and the exact shell commands for spawning a worker:
 

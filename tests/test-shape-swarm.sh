@@ -22,7 +22,7 @@ heading() { printf '\n\033[1;34m=== %s ===\033[0m\n' "$*"; }
 command -v jq >/dev/null 2>&1 || red "jq required for outcome JSON validation"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LISTENER="$SCRIPT_DIR/worker-listener.sh"
+LISTENER="$SCRIPT_DIR/../scripts/worker-listener.sh"
 [ -x "$LISTENER" ] || red "worker-listener.sh not executable: $LISTENER"
 
 TEST_DIR=$(mktemp -d -t shape-test-XXXXXX)

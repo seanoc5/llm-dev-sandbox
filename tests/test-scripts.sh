@@ -54,7 +54,7 @@ check_script() {
 echo "=== Script Sanity Checks ==="
 check_script "/opt/work/sysadmin/llm-dev-sandbox/llm-start.sh"
 check_script "/opt/work/sysadmin/llm-dev-sandbox/sandbox.sh"
-check_script "/opt/work/sysadmin/llm-dev-sandbox/worker-listener.sh"
+check_script "/opt/work/sysadmin/llm-dev-sandbox/scripts/worker-listener.sh"
 
 echo ""
 echo "Summary: $PASS passed, $FAIL failed."

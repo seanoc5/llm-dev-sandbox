@@ -9,7 +9,7 @@ set -euo pipefail
 
 # Configuration
 SESSION_NAME="llm-$(basename "$PWD")"
-SYSTEM_PROMPT_FILE="/opt/work/sysadmin/llm-dev-sandbox/COORDINATOR_SYSTEM_PROMPT.md"
+SYSTEM_PROMPT_FILE="/opt/work/sysadmin/llm-dev-sandbox/prompts/coordinator.md"
 INITIAL_PROMPT="${1:-Execute the Initial Startup Checklist.}"
 
 # Allow overriding the coordinator command and model
@@ -159,7 +159,7 @@ if ! $session_existed || $coordinator_idle; then
     # surfaces the actual message so users don't have to dig in /tmp.
     # No-op for claude — its -p mode prints tool calls and errors directly.
     if [ "$COORD_CMD" = "gemini" ]; then
-        ERR_TAIL='; /opt/work/sysadmin/llm-dev-sandbox/coordinator-error-tail.sh'
+        ERR_TAIL='; /opt/work/sysadmin/llm-dev-sandbox/scripts/coordinator-error-tail.sh'
     else
         ERR_TAIL=''
     fi

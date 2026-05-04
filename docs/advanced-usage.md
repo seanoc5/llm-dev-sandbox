@@ -29,19 +29,19 @@ While `llm-start.sh` handles orchestration autonomously, you can manually use `s
 
 ```bash
 # List all worktrees and their branches
-./sandbox-worktrees.sh /opt/work/myproject
+./scripts/sandbox-worktrees.sh /opt/work/myproject
 
 # Launch Claude sandbox in the current shell for this worktree
-./sandbox-worktrees.sh -a claude
+./scripts/sandbox-worktrees.sh -a claude
 
 # Create tmux windows starting at 7 — one per worktree
-./sandbox-worktrees.sh -t /opt/work/myproject
+./scripts/sandbox-worktrees.sh -t /opt/work/myproject
 
 # Create tmux windows AND launch Claude in each
-./sandbox-worktrees.sh -t -a claude /opt/work/myproject
+./scripts/sandbox-worktrees.sh -t -a claude /opt/work/myproject
 
 # Start at window 3 (implies -t)
-./sandbox-worktrees.sh -s 3 -a gemini /opt/work/myproject
+./scripts/sandbox-worktrees.sh -s 3 -a gemini /opt/work/myproject
 ```
 
 The `-a` flag behaves differently depending on whether `-t` is present:
@@ -204,7 +204,7 @@ If the coordinator's READY list is short, do them by hand. If it's long, you can
 The worker's branch contains a mix of valuable new work AND stale changes that conflict with master (because master moved while the worker ran). Drop a brief telling a fresh worker to reset and re-apply only the salvageable parts:
 
 ```bash
-cat <<'BRIEF' | /opt/work/sysadmin/llm-dev-sandbox/requeue.sh N -
+cat <<'BRIEF' | /opt/work/sysadmin/llm-dev-sandbox/scripts/requeue.sh N -
 ## Surgical re-do for issue #N
 
 Your earlier work added <X valuable thing> AND a rewrite of <Y> that
@@ -232,7 +232,7 @@ BRIEF
 Same shape as NEEDS_REVIEW, but the brief just enumerates the remaining scope:
 
 ```bash
-cat <<'BRIEF' | /opt/work/sysadmin/llm-dev-sandbox/requeue.sh N -
+cat <<'BRIEF' | /opt/work/sysadmin/llm-dev-sandbox/scripts/requeue.sh N -
 ## Follow-up to your prior work on issue #N
 
 You completed <subset>. The issue scope was <full set> — <remainder> remains:
@@ -250,11 +250,11 @@ BRIEF
 
 ```bash
 # single
-/opt/work/sysadmin/llm-dev-sandbox/kill-worktree.sh N
+/opt/work/sysadmin/llm-dev-sandbox/scripts/kill-worktree.sh N
 
 # batch
 for issue in <list>; do
-    /opt/work/sysadmin/llm-dev-sandbox/kill-worktree.sh "$issue"
+    /opt/work/sysadmin/llm-dev-sandbox/scripts/kill-worktree.sh "$issue"
 done
 ```
 

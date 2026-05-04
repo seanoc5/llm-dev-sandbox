@@ -50,7 +50,7 @@ yellow "Launching Coordinator with E2E test prompt..."
 # the new interactive REPL) since there's no human attached to answer.
 export NON_INTERACTIVE=1
 export WORKER_HEADLESS=1
-"$SCRIPT_DIR/llm-start.sh" "$TEST_PROMPT"
+"$SCRIPT_DIR/../llm-start.sh" "$TEST_PROMPT"
 
 echo ""
 yellow "Waiting up to 90 seconds for workers to complete their tasks..."
