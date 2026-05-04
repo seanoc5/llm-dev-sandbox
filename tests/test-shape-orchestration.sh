@@ -21,7 +21,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROVISION="$SCRIPT_DIR/../scripts/provision-worker.sh"
 WATCH="$SCRIPT_DIR/../scripts/coordinator-watch.sh"
 LIST="$SCRIPT_DIR/../scripts/sandbox-worktrees.sh"
-for s in "$PROVISION" "$WATCH" "$LIST"; do
+SWEEP="$SCRIPT_DIR/../scripts/sweep-swarm-outcomes.sh"
+for s in "$PROVISION" "$WATCH" "$LIST" "$SWEEP"; do
     [ -x "$s" ] || red "not executable: $s"
 done
 
@@ -196,10 +197,82 @@ grep -q "not inside a tmux session" "$TEST_DIR/list-err.log" \
     || red "expected 'not inside a tmux session' error"
 green "exits non-zero with 'not inside a tmux session' error"
 
+# ────────────────────────── sweep-swarm-outcomes.sh ──────────────────────────
+
+# Stage outcome JSONs in two of the existing worktrees so the sweep has
+# something to find. wt-issue-99 + wt-issue-100 already exist from the
+# provision tests above; add a 3rd worker without an outcome to confirm
+# the sweep skips empty done/ dirs.
+heading "Setup: stage outcome JSONs in 2 worktrees"
+mkdir -p "$TEST_DIR/wt-issue-99/.swarm/tasks/done"
+mkdir -p "$TEST_DIR/wt-issue-100/.swarm/tasks/done"
+echo '{"task_id":"t99","outcome":"ok"}'  > "$TEST_DIR/wt-issue-99/.swarm/tasks/done/t99.ok.json"
+echo '{"task_id":"t100","outcome":"err","exit_code":1}' > "$TEST_DIR/wt-issue-100/.swarm/tasks/done/t100.err.json"
+green "staged 1 .ok.json + 1 .err.json"
+
+heading "Test 9: sweep with default dry-run hook posts both outcomes"
+cd "$PROJECT_DIR"
+"$SWEEP" "$PROJECT_DIR" > "$TEST_DIR/sweep-1.log" 2>&1 || red "sweep exit non-zero: $(cat $TEST_DIR/sweep-1.log)"
+grep -qE 'Posted: 2  Skipped \(already posted\): 0  Failed: 0' "$TEST_DIR/sweep-1.log" \
+    || red "expected 'Posted: 2 Skipped: 0 Failed: 0'; got: $(grep -E 'Posted:' $TEST_DIR/sweep-1.log)"
+[ -f "$TEST_DIR/wt-issue-99/.swarm/tasks/done/t99.ok.json.posted" ] \
+    || red ".posted marker not written for t99"
+[ -f "$TEST_DIR/wt-issue-100/.swarm/tasks/done/t100.err.json.posted" ] \
+    || red ".posted marker not written for t100"
+grep -q '\[dry-run\] would post:' "$TEST_DIR/sweep-1.log" || red "dry-run hook output missing"
+green "default hook posted 2 outcomes; .posted markers written"
+
+heading "Test 10: sweep skips outcomes that already have .posted markers"
+"$SWEEP" "$PROJECT_DIR" > "$TEST_DIR/sweep-2.log" 2>&1 || red "sweep re-run exit non-zero"
+grep -qE 'Posted: 0  Skipped \(already posted\): 2  Failed: 0' "$TEST_DIR/sweep-2.log" \
+    || red "expected 'Posted: 0 Skipped: 2 Failed: 0'; got: $(grep -E 'Posted:' $TEST_DIR/sweep-2.log)"
+green "second sweep posts nothing — both outcomes skipped via marker"
+
+heading "Test 11: SWEEP_FORCE=1 re-posts despite existing markers"
+SWEEP_FORCE=1 "$SWEEP" "$PROJECT_DIR" > "$TEST_DIR/sweep-3.log" 2>&1 || red "sweep force exit non-zero"
+grep -qE 'Posted: 2  Skipped \(already posted\): 0  Failed: 0' "$TEST_DIR/sweep-3.log" \
+    || red "expected forced re-post of 2; got: $(grep -E 'Posted:' $TEST_DIR/sweep-3.log)"
+green "SWEEP_FORCE=1 re-posts both outcomes despite markers"
+
+heading "Test 12: sweep with custom OUTCOME_HOOK invokes it per outcome"
+HOOK="$TEST_DIR/bin/custom-hook.sh"
+cat > "$HOOK" <<EOF
+#!/usr/bin/env bash
+echo "HOOK-CALLED wt=\$1 outcome=\$2" >> "$TEST_DIR/hook-calls.log"
+EOF
+chmod +x "$HOOK"
+SWEEP_FORCE=1 OUTCOME_HOOK="$HOOK" "$SWEEP" "$PROJECT_DIR" > "$TEST_DIR/sweep-4.log" 2>&1 \
+    || red "sweep with custom hook exit non-zero"
+calls=$(wc -l < "$TEST_DIR/hook-calls.log")
+[ "$calls" -eq 2 ] || red "expected hook called 2 times, got $calls"
+grep -q 'HOOK-CALLED wt=.*wt-issue-99 outcome=.*t99\.ok\.json' "$TEST_DIR/hook-calls.log" \
+    || red "missing expected hook call for t99"
+grep -q 'HOOK-CALLED wt=.*wt-issue-100 outcome=.*t100\.err\.json' "$TEST_DIR/hook-calls.log" \
+    || red "missing expected hook call for t100"
+green "custom hook invoked once per outcome with (wt, outcome-json) args"
+
+heading "Test 13: sweep reports failure when hook returns non-zero"
+FAIL_HOOK="$TEST_DIR/bin/failing-hook.sh"
+cat > "$FAIL_HOOK" <<'EOF'
+#!/usr/bin/env bash
+exit 7
+EOF
+chmod +x "$FAIL_HOOK"
+# Add a fresh outcome that has no .posted marker yet
+echo '{"task_id":"tFAIL","outcome":"ok"}' > "$TEST_DIR/wt-issue-99/.swarm/tasks/done/tFAIL.ok.json"
+if OUTCOME_HOOK="$FAIL_HOOK" "$SWEEP" "$PROJECT_DIR" > "$TEST_DIR/sweep-5.log" 2>&1; then
+    red "sweep should exit non-zero when any hook call fails"
+fi
+grep -qE 'Failed: 1' "$TEST_DIR/sweep-5.log" || red "expected 'Failed: 1' in summary"
+[ ! -e "$TEST_DIR/wt-issue-99/.swarm/tasks/done/tFAIL.ok.json.posted" ] \
+    || red "marker should NOT be written when hook fails"
+green "failed hook → exit non-zero, no marker, summary reports failure"
+
 # ────────────────────────── Done ──────────────────────────
 
 heading "All shape-orchestration tests passed"
-echo "  provision-worker.sh: worktree+branch+brief, policy embedding, idempotent re-run"
-echo "  coordinator-watch.sh: polling backend detects new .ok.json, error on missing dir"
-echo "  sandbox-worktrees.sh: list mode, non-git error, -t-without-TMUX error"
+echo "  provision-worker.sh:     worktree+branch+brief, policy embedding, idempotent re-run"
+echo "  coordinator-watch.sh:    polling backend detects new .ok.json, error on missing dir"
+echo "  sandbox-worktrees.sh:    list mode, non-git error, -t-without-TMUX error"
+echo "  sweep-swarm-outcomes.sh: default hook, .posted idempotency, SWEEP_FORCE, custom hook, hook failure"
 yellow "Run with KEEP=1 to leave $TEST_DIR for inspection."

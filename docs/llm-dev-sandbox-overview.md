@@ -16,6 +16,7 @@ A persistent, local-first sandbox for running autonomous LLM agents (Claude Code
   - [.swarm-policy.md — Per-project rules-of-engagement](#swarm-policymd--per-project-rules-of-engagement-optional)
   - [OpenBrain MCP integration](#openbrain-mcp-integration)
   - [coordinator-watch.sh — Event-driven coordinator wake-ups](#coordinator-watchsh--event-driven-coordinator-wake-ups)
+  - [sweep-swarm-outcomes.sh — Audit-trail post-processing](#sweep-swarm-outcomessh--audit-trail-post-processing)
   - [coordinator-error-tail.sh — Surface gemini API errors](#coordinator-error-tailsh--surface-gemini-api-errors-in-the-pane)
   - [worker-listener.sh — Queue watcher for worker agents](#worker-listenersh--queue-watcher-for-worker-agents)
   - [prompts/coordinator.md — Coordinator's brain](#promptscoordinatormd--coordinators-brain)
@@ -274,6 +275,46 @@ ONCE=1 coordinator-watch.sh
 | `POLL_SECS` | `2` | Polling interval (polling backend only) |
 
 **Anti-runaway:** the default `WAKE_PROMPT` is read-only ("triage … decide next actions … do NOT dispatch new workers unless the user asked you to") and `DEBOUNCE_SECS` ensures back-to-back finishes don't N+1-loop the coordinator. Override `WAKE_PROMPT` if you want to hand more autonomy to the watcher.
+
+### `sweep-swarm-outcomes.sh` — Audit-trail post-processing
+
+Iterates worker-finished outcome JSONs across all sibling worktrees of a project and invokes a user-configured posting hook for each one. Idempotent via `<outcome>.posted` markers — re-runs only post new outcomes.
+
+The intended use case: at end-of-session (or after a coordinator-wake triage) you want every finished worker's outcome surfaced as a comment on the corresponding GitHub issue. The poster itself is **not** built into this repo because the comment format / target system is project-specific. Provide it via the `OUTCOME_HOOK` env-var.
+
+```bash
+# Default hook — dry-run, prints what it would post (safe to try)
+sweep-swarm-outcomes.sh /opt/work/myproject
+
+# Real use — point at your project's poster
+OUTCOME_HOOK=/opt/work/myproject/scripts/post-swarm-outcome.sh \
+    sweep-swarm-outcomes.sh /opt/work/myproject
+
+# Force re-post (e.g., after editing the hook to format differently)
+SWEEP_FORCE=1 OUTCOME_HOOK=... sweep-swarm-outcomes.sh /opt/work/myproject
+```
+
+**Hook contract:**
+
+The hook receives 2 args:
+1. `<worktree-path>` — e.g., `/opt/work/myproject/../wt-issue-142`. The hook can derive the issue number from `basename` (matches `wt-issue-N`).
+2. `<outcome-json-path>` — full path to the `<task_id>.{ok,err}.json` file. Parse with `jq` for `task_id`, `outcome`, `exit_code`, `duration_seconds`, etc.
+
+Hook exit `0` = success → sweep writes the `.posted` marker. Non-zero = retry on next sweep, no marker.
+
+**Why a hook instead of built-in `gh issue comment`:**
+
+- Comment format is opinionated: PR link? Test results? Triage verdict? Each project differs.
+- Audit destination varies — could be Slack, Linear, an internal dashboard, not just GitHub.
+- Keeps `llm-dev-sandbox` agnostic about how a project tracks work.
+
+**Why a sweep instead of automatic post-on-worker-exit:**
+
+- Post-on-exit would need `gh` auth from inside the worker container — extra coupling.
+- Sweep gives you a chance to inspect outcomes before they're broadcast (especially `.err.json` cases).
+- Re-runnable: idempotent markers mean you can safely re-sweep after fixing a bad hook.
+
+If you want post-on-exit despite the trade-offs, layer it: have `coordinator-watch.sh`'s wake-prompt also invoke `sweep-swarm-outcomes.sh`, or add a `WORKER_POST_HOOK` env-var to `worker-listener.sh` (not built today).
 
 ### `coordinator-error-tail.sh` — Surface gemini API errors in the pane
 
