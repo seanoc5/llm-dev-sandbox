@@ -85,6 +85,14 @@ Generalized launcher: `sandbox.sh <project-dir> <agent> [extra-args]`
 
 Creates `tmux` session `llm-<basename-of-cwd>` if missing, opens window 1 as `coordinator`, and launches the configured coordinator command in headless print mode (`-p`) with the initial prompt and the system prompt from `prompts/coordinator.md`.
 
+Optionally also spawns `coordinator-watch.sh` in window 2 (`watch`) when `WATCH=1`. The watcher inherits `POST_OUTCOMES`, `OUTCOME_HOOK`, `DEBOUNCE_SECS`, `WAKE_PROMPT`, `POLL_SECS`, `WORKSPACE`, and `SWEEP` from the caller's env, so:
+
+```bash
+WATCH=1 POST_OUTCOMES=1 OUTCOME_HOOK=/path/to/poster ./llm-start.sh
+```
+
+…spins up the entire unattended supervisor pattern (coordinator + event-driven wakes + audit-trail posting) from a single invocation. Idempotent — re-running with `WATCH=1` against an existing session that already has a `watch` window logs a "skipping watch spawn" notice instead of stacking duplicates.
+
 #### Session reuse: detect-dead-coordinator
 
 When the session already exists, `llm-start.sh` inspects the coordinator pane's current command (`tmux list-panes -F '#{pane_current_command}'`) and decides:

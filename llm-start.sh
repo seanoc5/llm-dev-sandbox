@@ -3,8 +3,19 @@
 # llm-start.sh - Bootstrap the multi-agent tmux session
 #
 # This script creates a dedicated tmux session for the current project,
-# spawns the Gemini Coordinator agent in the first window, and issues
-# its initial startup command.
+# spawns the coordinator agent (claude by default; gemini if
+# COORDINATOR_CMD=gemini) in the first window, and issues its initial
+# startup command.
+#
+# Optional flags (env vars):
+#   COORDINATOR_CMD={claude,gemini}   Default: claude
+#   COORDINATOR_MODEL=<id>            Per-coordinator default; see below
+#   COORDINATOR_VERBOSE=1             Stay interactive in coordinator pane
+#   WATCH=1                           Spawn coordinator-watch.sh in a 2nd
+#                                     tmux window (carries POST_OUTCOMES,
+#                                     OUTCOME_HOOK, DEBOUNCE_SECS, etc.
+#                                     from caller env)
+#   NON_INTERACTIVE=1                 Don't auto-attach to the session
 set -euo pipefail
 
 # Configuration
@@ -181,6 +192,34 @@ if ! $session_existed || $coordinator_idle; then
     fi
 
     tmux send-keys -t "$SESSION_NAME:coordinator" "$BASE_CMD $PROMPT_FLAG \"\$(cat '$TMP_PROMPT')\"; rm '$TMP_PROMPT'$ERR_TAIL" C-m
+fi
+
+# Optionally spawn coordinator-watch.sh in its own tmux window so the
+# unattended supervisor pattern is one command instead of two terminals.
+# WATCH=1 enables; POST_OUTCOMES + OUTCOME_HOOK propagate from caller env
+# (so `WATCH=1 POST_OUTCOMES=1 OUTCOME_HOOK=/path ./llm-start.sh` gives
+# you coordinator + watcher + audit posting from a single invocation).
+# Idempotent: skips if a 'watch' window already exists in the session.
+if [ "${WATCH:-0}" = "1" ]; then
+    if tmux list-windows -t "$SESSION_NAME" -F '#W' 2>/dev/null | grep -qx 'watch'; then
+        echo "tmux window '$SESSION_NAME:watch' already exists — skipping watch spawn"
+    else
+        WATCH_SCRIPT="/opt/work/sysadmin/llm-dev-sandbox/scripts/coordinator-watch.sh"
+        # printf %q makes every value safe for re-parsing in the new shell,
+        # which matters for OUTCOME_HOOK paths and prompts that may contain
+        # spaces or quotes.
+        WATCH_CMD=""
+        for _v in POST_OUTCOMES OUTCOME_HOOK DEBOUNCE_SECS WAKE_PROMPT POLL_SECS WORKSPACE SWEEP; do
+            _val="${!_v:-}"
+            [ -n "$_val" ] && WATCH_CMD+="$_v=$(printf '%q' "$_val") "
+        done
+        WATCH_CMD+="$WATCH_SCRIPT $(printf '%q' "$PWD")"
+        tmux new-window -d -t "$SESSION_NAME" -n watch "$WATCH_CMD"
+        echo "Spawned coordinator-watch in tmux window '$SESSION_NAME:watch'"
+        if [ "${POST_OUTCOMES:-0}" = "1" ] && [ -z "${OUTCOME_HOOK:-}" ]; then
+            echo "  WARN: POST_OUTCOMES=1 but no OUTCOME_HOOK set — sweep will use dry-run stub (no real posts)"
+        fi
+    fi
 fi
 
 # Attach or switch to the session
