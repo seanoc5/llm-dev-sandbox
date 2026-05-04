@@ -86,6 +86,32 @@ This means you can re-invoke `llm-start.sh` repeatedly with new prompts without 
 - The system prompt is injected via `--append-system-prompt "$(cat $SYSTEM_PROMPT_FILE)"` (claude-code's equivalent of gemini's `GEMINI_SYSTEM_MD`).
 - `--dangerously-skip-permissions` is passed (matches gemini's `--yolo` semantics for autonomous operation).
 
+### `kill-worktree.sh` — Clean up a worker worktree
+
+Reverse of `provision-worker.sh`. Removes the worktree, deletes the `fix/issue-N` branch, and kills the `iss-N` tmux window if any. Idempotent — warns about missing pieces but never errors.
+
+```bash
+kill-worktree.sh <issue-number> [project-dir]
+```
+
+Use for ABANDON verdicts from coordinator triage. Uses `--force` on the worktree removal — uncommitted work is lost. The script prints `N commits ahead of master, M uncommitted changes` before deletion so you can spot any worktree that has unexpected work.
+
+### `requeue.sh` — Drop a follow-up brief into a worker's queue
+
+Atomic write into a worker's `.swarm/tasks/inbox/`. Wraps the mktemp+mv pattern so the listener never sees a half-written brief.
+
+```bash
+requeue.sh <wt-path|issue-N> <brief-file>     # brief from file
+requeue.sh <wt-path|issue-N> -                # brief from stdin
+echo "..." | requeue.sh <wt-path|issue-N> -
+```
+
+If the first argument is purely numeric, it's resolved to `../wt-issue-<N>` relative to PWD. Otherwise it's a literal path.
+
+After dropping the brief, prints a hint about whether the listener tmux window is alive — so you don't sit waiting for a brief that nothing is polling. If no listener is running, prints the exact `tmux new-window` / `sandbox.sh listener` command to start one.
+
+Use for PARTIAL or NEEDS_REVIEW verdicts where a follow-up surgical brief is the right next step.
+
 ### `provision-worker.sh` — One-call worker dispatch
 
 Coordinator helper that creates a worktree, initializes the v2 queue, embeds `.swarm-policy.md` guardrails into the brief, atomic-writes the task, and spawns the worker tmux window — all in a single command call.
