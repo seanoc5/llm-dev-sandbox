@@ -44,6 +44,10 @@
 set -euo pipefail
 
 PROJECT_DIR="$(realpath "${1:-$PWD}")"
+# Worker worktrees are siblings of PROJECT_DIR (provision-worker.sh creates
+# them at <parent>/wt-issue-N), so the watch must scan the parent — not
+# PROJECT_DIR itself. Override with WORKSPACE=<dir> for non-standard layouts.
+WORKSPACE="$(realpath "${WORKSPACE:-$(dirname "$PROJECT_DIR")}")"
 DEBOUNCE_SECS="${DEBOUNCE_SECS:-30}"
 DRY_RUN="${DRY_RUN:-0}"
 ONCE="${ONCE:-0}"
@@ -55,6 +59,7 @@ SWEEP="${SWEEP:-/opt/work/sysadmin/llm-dev-sandbox/scripts/sweep-swarm-outcomes.
 
 # Validation
 [ -d "$PROJECT_DIR" ] || { echo "ERROR: not a directory: $PROJECT_DIR" >&2; exit 1; }
+[ -d "$WORKSPACE" ]   || { echo "ERROR: workspace not a directory: $WORKSPACE" >&2; exit 1; }
 [ -x "$LLM_START" ]   || { echo "ERROR: llm-start.sh not executable: $LLM_START" >&2; exit 1; }
 if [ "$POST_OUTCOMES" = "1" ]; then
     [ -x "$SWEEP" ] || { echo "ERROR: sweep script not executable: $SWEEP" >&2; exit 1; }
@@ -70,6 +75,7 @@ fi
 cat <<EOF
 === coordinator-watch.sh ===
 project:       $PROJECT_DIR
+workspace:     $WORKSPACE (scanning $WORKSPACE/wt-issue-*/.swarm/tasks/done/)
 backend:       $BACKEND$([ "$BACKEND" = "poll" ] && echo " (install inotify-tools for instant response)")
 debounce:      ${DEBOUNCE_SECS}s
 poll interval: ${POLL_SECS}s$([ "$BACKEND" = "inotify" ] && echo " (unused in inotify mode)")
@@ -134,20 +140,20 @@ on_outcome() {
 # Backend: inotify
 # ---------------------------------------------------------------------------
 run_inotify() {
-    # Watch project root recursively for create + moved_to events.
-    # The listener does `mv processing/X.md done/X.md` followed by writing
-    # done/X.json — both surface as create/moved_to events. We filter to
-    # only outcome JSONs in worker done dirs.
+    # Watch the workspace (parent of project) recursively, filtering events
+    # to only outcomes inside wt-issue-*/.swarm/tasks/done/. The listener
+    # does `mv processing/X.md done/X.md` followed by writing done/X.json —
+    # both surface as create/moved_to events.
     #
     # --exclude noisy dirs to keep watch count low.
     inotifywait -m -r \
         --exclude '/(\.git|node_modules|build|target|\.gradle|dist|out|\.next|\.venv|venv)(/|$)' \
         -e create -e moved_to \
         --format '%w%f' \
-        "$PROJECT_DIR" 2>/dev/null \
+        "$WORKSPACE" 2>/dev/null \
     | while IFS= read -r path; do
         case "$path" in
-            */.swarm/tasks/done/*.ok.json|*/.swarm/tasks/done/*.err.json)
+            */wt-issue-*/.swarm/tasks/done/*.ok.json|*/wt-issue-*/.swarm/tasks/done/*.err.json)
                 on_outcome "$path"
                 ;;
         esac
@@ -164,17 +170,27 @@ run_poll() {
     seen_file=$(mktemp -t coord-watch-seen-XXXXXX)
     trap 'rm -f "$seen_file"' EXIT INT TERM
 
-    find "$PROJECT_DIR" \( -name node_modules -o -name .git -o -name build -o -name target -o -name .gradle \) -prune \
-        -o -path '*/.swarm/tasks/done/*.ok.json' -print \
-        -o -path '*/.swarm/tasks/done/*.err.json' -print 2>/dev/null \
-        | sort -u > "$seen_file"
+    # Scan only wt-issue-*/.swarm/tasks/done dirs under WORKSPACE. The glob
+    # may expand to nothing if no worker worktrees exist yet — handle that
+    # gracefully via nullglob so the find call gets an empty arg list.
+    scan_outcomes() {
+        local done_dirs=()
+        shopt -s nullglob
+        done_dirs=("$WORKSPACE"/wt-issue-*/.swarm/tasks/done)
+        shopt -u nullglob
+        if [ "${#done_dirs[@]}" -eq 0 ]; then
+            return 0   # no worker worktrees — emit empty
+        fi
+        find "${done_dirs[@]}" -maxdepth 1 \
+            \( -name '*.ok.json' -o -name '*.err.json' \) -print 2>/dev/null \
+            | sort -u
+    }
+
+    scan_outcomes > "$seen_file"
 
     while true; do
         local current diff_new
-        current=$(find "$PROJECT_DIR" \( -name node_modules -o -name .git -o -name build -o -name target -o -name .gradle \) -prune \
-            -o -path '*/.swarm/tasks/done/*.ok.json' -print \
-            -o -path '*/.swarm/tasks/done/*.err.json' -print 2>/dev/null \
-            | sort -u)
+        current=$(scan_outcomes)
 
         # New paths = in current, not in seen. Guard against the shutdown
         # race where the EXIT trap removes seen_file mid-iteration.

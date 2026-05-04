@@ -121,9 +121,10 @@ green "re-run reuses worktree, queues a follow-up brief"
 # ────────────────────────── coordinator-watch.sh ──────────────────────────
 
 heading "Test 4: coordinator-watch.sh detects new outcome JSON (DRY_RUN, ONCE)"
-# coordinator-watch.sh's find scans only under the given project dir.
-# Stage the queue dirs INSIDE PROJECT_DIR so the watch can detect them.
-mkdir -p "$PROJECT_DIR/.swarm/tasks/done"
+# coordinator-watch scans WORKSPACE/wt-issue-*/.swarm/tasks/done/ — i.e.
+# sibling worktrees of PROJECT_DIR (matching what provision-worker creates).
+# wt-issue-99 already exists from Test 1; ensure the done dir is present.
+mkdir -p "$WT/.swarm/tasks/done"
 
 # Use a fake llm-start that we'll never actually invoke (DRY_RUN=1)
 FAKE_LLM_START="$TEST_DIR/bin/fake-llm-start.sh"
@@ -143,8 +144,8 @@ WATCH_PID=$!
 # Give the watch time to baseline existing files
 sleep 1.5
 
-# Drop a NEW outcome JSON — should trigger wake
-echo '{"task_id":"t1","outcome":"ok"}' > "$PROJECT_DIR/.swarm/tasks/done/t1.ok.json"
+# Drop a NEW outcome JSON in a sibling worktree (real-world layout)
+echo '{"task_id":"t1","outcome":"ok"}' > "$WT/.swarm/tasks/done/t1.ok.json"
 
 # Wait up to 10s for ONCE=1 watch to exit (it should after first wake)
 for ((i=0; i<20; i++)); do
@@ -159,6 +160,9 @@ grep -q '\[DRY\] would:' "$TEST_DIR/watch.log" \
 grep -q "ONCE=1 — exiting after first wake" "$TEST_DIR/watch.log" \
     || red "expected ONCE exit message"
 green "polling backend detected new .ok.json, would-wake logged, ONCE=1 exited"
+
+# Clean up the trigger outcome so it doesn't leak into the sweep tests
+rm -f "$WT/.swarm/tasks/done/t1.ok.json"
 
 heading "Test 5: coordinator-watch.sh rejects missing project dir"
 # realpath bails first under set -e, so we just check non-zero exit + a
@@ -283,13 +287,8 @@ echo "INTEGRATION-HOOK: \$1 \$2" >> "$TEST_DIR/integration-hook.log"
 EOF
 chmod +x "$INTEGRATION_HOOK"
 
-# Trigger event needs to land where coordinator-watch.sh's find can see it
-# (under PROJECT_DIR). The sweep then independently scans sibling worktrees.
-mkdir -p "$PROJECT_DIR/.swarm/tasks/done"
-
-# Start watch with POST_OUTCOMES=1; DRY_RUN=1 keeps wake from invoking real
-# llm-start, but POST_OUTCOMES path is gated separately on DRY_RUN — check
-# watch's logic: posting in DRY_RUN logs '[DRY] would: ...' instead.
+# Stage queue dirs in wt-issue-77 (already done above) — that's where the
+# watch will fire its event AND where the sweep will scan. Single layout.
 cd "$PROJECT_DIR"
 DRY_RUN=0 ONCE=1 POLL_SECS=1 \
     POST_OUTCOMES=1 OUTCOME_HOOK="$INTEGRATION_HOOK" \
@@ -300,8 +299,8 @@ INT_WATCH_PID=$!
 # Baseline scan
 sleep 1.5
 
-# Drop NEW trigger event under PROJECT_DIR
-echo '{"task_id":"trigger","outcome":"ok"}' > "$PROJECT_DIR/.swarm/tasks/done/trigger.ok.json"
+# Drop NEW outcome in a sibling worktree — watch detects it AND sweep posts it
+echo '{"task_id":"trigger","outcome":"ok"}' > "$TEST_DIR/wt-issue-77/.swarm/tasks/done/trigger.ok.json"
 
 # Wait up to 10s for ONCE=1 exit
 for ((i=0; i<20; i++)); do
