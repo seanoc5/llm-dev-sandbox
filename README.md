@@ -45,9 +45,13 @@ git clone git@github.com:seanoc5/llm-dev-sandbox.git
 cd llm-dev-sandbox
 docker build -t llm-sandbox:latest .
 
-# One-time host-side setup (idempotent; re-run after gemini-cli upgrades)
+# One-time host-side setup (idempotent; re-run after gemini-cli upgrades).
+# At the end it prints the recommended LLM_SANDBOX_DIR + PATH exports for
+# your shell rc — copy them into ~/.bashrc / ~/.zshrc.
 ./scripts/setup.sh
 ```
+
+The clone path is up to you — every script self-locates via `BASH_SOURCE`, so `git clone … && cd … && ./llm-start.sh` works from anywhere. Setting `LLM_SANDBOX_DIR` in your shell rc is only needed when you run scripts from outside the repo or via wrappers that don't preserve the path.
 
 `scripts/setup.sh` symlinks the system `rg` into the path `@google/gemini-cli` looks for (the npm package omits its bundled binary). Without it gemini logs `Ripgrep is not available. Falling back to GrepTool.` on every run and uses a slower built-in matcher.
 
@@ -58,8 +62,8 @@ Let the coordinator triage your backlog and provision worker agents.
 # Navigate to any project you want to work on
 cd /opt/work/myproject
 
-# Bootstrap the coordinator (gemini default; COORDINATOR_CMD=claude to use Claude Max)
-/opt/work/sysadmin/llm-dev-sandbox/llm-start.sh "Optional initial prompt; default: run startup checklist"
+# Bootstrap the coordinator (claude default; COORDINATOR_CMD=gemini to use Gemini)
+$LLM_SANDBOX_DIR/llm-start.sh "Optional initial prompt; default: run startup checklist"
 ```
 This creates a dedicated `tmux` session, runs the coordinator in Window 1 with the prompt you supplied (default: survey GitHub issues + provision workers), and spawns isolated Claude worker agents in dockerized git worktrees, one per dispatched issue.
 
@@ -104,10 +108,10 @@ If you just want a safe shell for a single agent:
 
 ```bash
 # Launch Claude Code inside the sandbox for your project
-/opt/work/sysadmin/llm-dev-sandbox/sandbox.sh /path/to/project claude
+$LLM_SANDBOX_DIR/sandbox.sh /path/to/project claude
 
 # Launch Gemini CLI inside the sandbox
-/opt/work/sysadmin/llm-dev-sandbox/sandbox.sh /path/to/project gemini
+$LLM_SANDBOX_DIR/sandbox.sh /path/to/project gemini
 ```
 
 ---

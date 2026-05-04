@@ -147,7 +147,7 @@ Use `COORDINATOR_CMD=claude` for this — claude streams tool calls cleanly to t
 
 ```bash
 cd /opt/work/myproject
-COORDINATOR_CMD=claude /opt/work/sysadmin/llm-dev-sandbox/llm-start.sh "$(cat <<'EOF'
+COORDINATOR_CMD=claude $LLM_SANDBOX_DIR/llm-start.sh "$(cat <<'EOF'
 Triage the existing worker worktrees. READ-ONLY — do NOT push, do NOT
 open PRs, do NOT merge, do NOT close issues, do NOT remove worktrees,
 do NOT provision new workers.
@@ -204,7 +204,7 @@ If the coordinator's READY list is short, do them by hand. If it's long, you can
 The worker's branch contains a mix of valuable new work AND stale changes that conflict with master (because master moved while the worker ran). Drop a brief telling a fresh worker to reset and re-apply only the salvageable parts:
 
 ```bash
-cat <<'BRIEF' | /opt/work/sysadmin/llm-dev-sandbox/scripts/requeue.sh N -
+cat <<'BRIEF' | $LLM_SANDBOX_DIR/scripts/requeue.sh N -
 ## Surgical re-do for issue #N
 
 Your earlier work added <X valuable thing> AND a rewrite of <Y> that
@@ -232,7 +232,7 @@ BRIEF
 Same shape as NEEDS_REVIEW, but the brief just enumerates the remaining scope:
 
 ```bash
-cat <<'BRIEF' | /opt/work/sysadmin/llm-dev-sandbox/scripts/requeue.sh N -
+cat <<'BRIEF' | $LLM_SANDBOX_DIR/scripts/requeue.sh N -
 ## Follow-up to your prior work on issue #N
 
 You completed <subset>. The issue scope was <full set> — <remainder> remains:
@@ -250,11 +250,11 @@ BRIEF
 
 ```bash
 # single
-/opt/work/sysadmin/llm-dev-sandbox/scripts/kill-worktree.sh N
+$LLM_SANDBOX_DIR/scripts/kill-worktree.sh N
 
 # batch
 for issue in <list>; do
-    /opt/work/sysadmin/llm-dev-sandbox/scripts/kill-worktree.sh "$issue"
+    $LLM_SANDBOX_DIR/scripts/kill-worktree.sh "$issue"
 done
 ```
 
@@ -269,7 +269,7 @@ cd /opt/work/myproject
 
 # 1. Recreate the session if needed (status-only prompt — read-only)
 tmux has-session -t "llm-$(basename $PWD)" 2>/dev/null || \
-    NON_INTERACTIVE=1 /opt/work/sysadmin/llm-dev-sandbox/llm-start.sh \
+    NON_INTERACTIVE=1 $LLM_SANDBOX_DIR/llm-start.sh \
         "Status check ONLY — list worktrees and recent outcomes."
 
 # 2. Spawn a listener window per worktree you'll act on
@@ -279,7 +279,7 @@ for issue in <list>; do
     SESSION="llm-$(basename $PWD)"
     tmux list-windows -t "$SESSION" -F '#W' 2>/dev/null | grep -qx "iss-$issue" || \
         tmux new-window -d -t "$SESSION" -n "iss-$issue" \
-            "/opt/work/sysadmin/llm-dev-sandbox/sandbox.sh $WT listener"
+            "$LLM_SANDBOX_DIR/sandbox.sh $WT listener"
 done
 
 # 3. Verify

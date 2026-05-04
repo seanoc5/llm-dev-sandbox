@@ -60,4 +60,22 @@ else
 fi
 
 echo
+
+# --- 5. LLM_SANDBOX_DIR export hint ---------------------------------------
+# Scripts self-locate via BASH_SOURCE so the runtime path is portable, but
+# users who invoke them from arbitrary directories (or via wrapper scripts)
+# benefit from having LLM_SANDBOX_DIR exported in their shell rc — that way
+# `coordinator.md` template substitution and `.env` search paths use the
+# right install regardless of how scripts are reached.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LLM_SANDBOX_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Only print the hint if the user's environment doesn't already match.
+if [ "${LLM_SANDBOX_DIR_ENV:-${LLM_SANDBOX_DIR_ENV_VAR:-}}" != "$LLM_SANDBOX_DIR" ]; then
+    yellow "Tip: add this to your ~/.bashrc / ~/.zshrc so all callers find this install:"
+    echo "    export LLM_SANDBOX_DIR=\"$LLM_SANDBOX_DIR\""
+    echo "    export PATH=\"\$LLM_SANDBOX_DIR:\$LLM_SANDBOX_DIR/scripts:\$PATH\""
+    echo
+fi
+
 green "Setup complete."

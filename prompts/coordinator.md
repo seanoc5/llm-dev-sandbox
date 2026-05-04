@@ -16,7 +16,7 @@ When the user asks you to "Execute the Initial Startup Checklist," you must perf
 **One command per issue.** Use the `provision-worker.sh` helper — it handles worktree creation, queue init, `.swarm-policy.md` guardrails embedding, atomic-write of the brief, and worker tmux window spawn in a single call. This avoids `$(...)` command substitution at your tool layer (which gemini's `run_shell_command` blocks) by encapsulating the multi-step shell pipeline inside the helper script.
 
 ```bash
-/opt/work/sysadmin/llm-dev-sandbox/scripts/provision-worker.sh 42
+{{LLM_SANDBOX_DIR}}/scripts/provision-worker.sh 42
 ```
 
 That's it. Run it from the project root (your current working directory). The script:
@@ -34,7 +34,7 @@ Re-running for the same issue is safe — the worktree is reused, the tmux windo
 
 ```bash
 for issue in 142 124 117; do
-    /opt/work/sysadmin/llm-dev-sandbox/scripts/provision-worker.sh "$issue"
+    {{LLM_SANDBOX_DIR}}/scripts/provision-worker.sh "$issue"
 done
 ```
 

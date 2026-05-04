@@ -76,7 +76,7 @@ Free tier and AI Pro plans both hit `generativelanguage.googleapis.com`. Symptom
 Check usage at https://aistudio.google.com/app/apikey (per-key) or https://console.cloud.google.com/apis/api/generativelanguage.googleapis.com/quotas (project-wide). The `coordinator-error-tail.sh` helper decodes recent error files:
 
 ```bash
-/opt/work/sysadmin/llm-dev-sandbox/scripts/coordinator-error-tail.sh
+$LLM_SANDBOX_DIR/scripts/coordinator-error-tail.sh
 ```
 
 ### Gemini API key — get / validate
@@ -89,7 +89,7 @@ Check usage at https://aistudio.google.com/app/apikey (per-key) or https://conso
   ```
   A model name means the key works. `400 API_KEY_INVALID` = bad key; `403 PERMISSION_DENIED` = key disabled or restricted.
 
-`llm-start.sh` searches for `GEMINI_API_KEY` in (in order): the project `.env`, `~/.gemini/.env`, `llm-dev-sandbox/.env`, `/opt/work/sysadmin/.env`.
+`llm-start.sh` searches for `GEMINI_API_KEY` in (in order): the project `.env`, `~/.gemini/.env`, `$LLM_SANDBOX_DIR/.env`, `/opt/work/sysadmin/.env`, then any paths supplied via `LLM_ENV_FILES=path1:path2:...`.
 
 ### Coordinator picks the wrong billing path
 
@@ -212,7 +212,7 @@ Most common cause: no listener tmux window. `requeue.sh` warns about this — re
 
 ```bash
 tmux new-window -d -t llm-<projbase> -n iss-N \
-    "/opt/work/sysadmin/llm-dev-sandbox/sandbox.sh /path/to/worktree listener"
+    "$LLM_SANDBOX_DIR/sandbox.sh /path/to/worktree listener"
 ```
 
 Other causes:

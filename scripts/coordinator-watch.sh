@@ -51,11 +51,15 @@ WORKSPACE="$(realpath "${WORKSPACE:-$(dirname "$PROJECT_DIR")}")"
 DEBOUNCE_SECS="${DEBOUNCE_SECS:-30}"
 DRY_RUN="${DRY_RUN:-0}"
 ONCE="${ONCE:-0}"
-LLM_START="${LLM_START:-/opt/work/sysadmin/llm-dev-sandbox/llm-start.sh}"
+# Self-locate so defaults follow the script wherever it lives. LLM_START and
+# SWEEP env overrides still win for non-standard installs.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LLM_SANDBOX_DIR="${LLM_SANDBOX_DIR:-$(dirname "$SCRIPT_DIR")}"
+LLM_START="${LLM_START:-$LLM_SANDBOX_DIR/llm-start.sh}"
 WAKE_PROMPT="${WAKE_PROMPT:-Worker(s) just finished. Triage their outcome JSONs in worktrees/.swarm/tasks/done/ and decide next actions. Do NOT dispatch new workers unless the user asked you to.}"
 POLL_SECS="${POLL_SECS:-2}"
 POST_OUTCOMES="${POST_OUTCOMES:-0}"
-SWEEP="${SWEEP:-/opt/work/sysadmin/llm-dev-sandbox/scripts/sweep-swarm-outcomes.sh}"
+SWEEP="${SWEEP:-$LLM_SANDBOX_DIR/scripts/sweep-swarm-outcomes.sh}"
 
 # Validation
 [ -d "$PROJECT_DIR" ] || { echo "ERROR: not a directory: $PROJECT_DIR" >&2; exit 1; }

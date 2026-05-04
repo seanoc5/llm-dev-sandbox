@@ -19,8 +19,14 @@
 set -euo pipefail
 
 # Configuration
+# Self-locate so the sandbox tree works from any clone path (not tied to
+# /opt/work/sysadmin/...). LLM_SANDBOX_DIR overrides if you want to point at
+# a different install while running this script from elsewhere.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LLM_SANDBOX_DIR="${LLM_SANDBOX_DIR:-$SCRIPT_DIR}"
+
 SESSION_NAME="llm-$(basename "$PWD")"
-SYSTEM_PROMPT_FILE="/opt/work/sysadmin/llm-dev-sandbox/prompts/coordinator.md"
+SYSTEM_PROMPT_FILE="$LLM_SANDBOX_DIR/prompts/coordinator.md"
 INITIAL_PROMPT="${1:-Execute the Initial Startup Checklist.}"
 
 # Allow overriding the coordinator command and model
@@ -42,16 +48,26 @@ COORD_MODEL="${COORDINATOR_MODEL:-$COORD_MODEL_DEFAULT}"
 
 # Auto-discover GEMINI_API_KEY when running gemini coordinator. Gemini CLI only
 # auto-loads .env from CWD/walks up to $HOME and ~/.gemini/.env — it never
-# finds keys stored in the sysadmin repo. So we walk a known list and source
-# the first match into our env. tmux new-session -e then propagates it into
-# the coordinator pane.
+# finds keys stored outside those paths. So we walk a configurable list and
+# source the first match. tmux new-session -e then propagates it into the
+# coordinator pane.
+#
+# Default search list works on the original minti9 layout. Append to it via
+# LLM_ENV_FILES (colon-separated, like $PATH) for additional locations
+# without losing the defaults.
 GEMINI_ENV_SOURCED=""
 if [ "$COORD_CMD" = "gemini" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
-    for _candidate in \
-        "$PWD/.env" \
-        "$HOME/.gemini/.env" \
-        "/opt/work/sysadmin/llm-dev-sandbox/.env" \
-        "/opt/work/sysadmin/.env"; do
+    _env_candidates=(
+        "$PWD/.env"
+        "$HOME/.gemini/.env"
+        "$LLM_SANDBOX_DIR/.env"
+        "/opt/work/sysadmin/.env"
+    )
+    if [ -n "${LLM_ENV_FILES:-}" ]; then
+        IFS=':' read -ra _extra_envs <<< "$LLM_ENV_FILES"
+        _env_candidates+=("${_extra_envs[@]}")
+    fi
+    for _candidate in "${_env_candidates[@]}"; do
         if [ -f "$_candidate" ] && grep -q '^GEMINI_API_KEY=' "$_candidate" 2>/dev/null; then
             set -a
             # shellcheck source=/dev/null
@@ -65,7 +81,8 @@ if [ "$COORD_CMD" = "gemini" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
     done
     if [ -z "${GEMINI_API_KEY:-}" ]; then
         echo "WARN: GEMINI_API_KEY not in env and not found in any of:" >&2
-        echo "      \$PWD/.env, ~/.gemini/.env, /opt/work/sysadmin/llm-dev-sandbox/.env, /opt/work/sysadmin/.env" >&2
+        printf '      %s\n' "${_env_candidates[@]}" >&2
+        echo "      (extend the search list via LLM_ENV_FILES=path1:path2:...)" >&2
         echo "      gemini will fail with 'specify the GEMINI_API_KEY' on launch." >&2
     fi
 fi
@@ -135,9 +152,17 @@ if ! $session_existed || $coordinator_idle; then
     TMP_PROMPT=$(mktemp)
     echo "$INITIAL_PROMPT" > "$TMP_PROMPT"
 
+    # Render the system prompt with {{LLM_SANDBOX_DIR}} substituted, so the
+    # coordinator's instructions reference the actual install path rather
+    # than a hardcoded one. The rendered file is consumed below by
+    # GEMINI_SYSTEM_MD / --append-system-prompt; we let it leak into /tmp
+    # since it's tiny, deterministic, and the rendered prompt is harmless.
+    RENDERED_PROMPT_FILE=$(mktemp -t coordinator-prompt-XXXXXX.md)
+    sed "s|{{LLM_SANDBOX_DIR}}|$LLM_SANDBOX_DIR|g" "$SYSTEM_PROMPT_FILE" > "$RENDERED_PROMPT_FILE"
+
     # Construct the base command
     if [ "$COORD_CMD" = "gemini" ]; then
-        BASE_CMD="GEMINI_SYSTEM_MD='$SYSTEM_PROMPT_FILE' gemini -m '$COORD_MODEL' --yolo --skip-trust"
+        BASE_CMD="GEMINI_SYSTEM_MD='$RENDERED_PROMPT_FILE' gemini -m '$COORD_MODEL' --yolo --skip-trust"
     elif [ "$COORD_CMD" = "claude" ]; then
         # Claude Max users authenticate via OAuth stored in ~/.claude/. If
         # ANTHROPIC_API_KEY is set, claude-code prefers it over the OAuth
@@ -158,7 +183,7 @@ if ! $session_existed || $coordinator_idle; then
         # so the default 'claude-opus-4-7[1m]' (which contains bash glob
         # chars [ and ]) survives shell parsing when BASE_CMD is executed.
         # shellcheck disable=SC2016  # $COORD_MODEL is in double-quoted context, so it does expand
-        BASE_CMD="${ENV_PREFIX}claude ${COORD_MODEL:+--model '$COORD_MODEL'} --append-system-prompt \"\$(cat '$SYSTEM_PROMPT_FILE')\" --dangerously-skip-permissions"
+        BASE_CMD="${ENV_PREFIX}claude ${COORD_MODEL:+--model '$COORD_MODEL'} --append-system-prompt \"\$(cat '$RENDERED_PROMPT_FILE')\" --dangerously-skip-permissions"
     else
         BASE_CMD="$COORD_CMD"
     fi
@@ -186,7 +211,7 @@ if ! $session_existed || $coordinator_idle; then
     # surfaces the actual message so users don't have to dig in /tmp.
     # No-op for claude — its -p mode prints tool calls and errors directly.
     if [ "$COORD_CMD" = "gemini" ]; then
-        ERR_TAIL='; /opt/work/sysadmin/llm-dev-sandbox/scripts/coordinator-error-tail.sh'
+        ERR_TAIL="; $LLM_SANDBOX_DIR/scripts/coordinator-error-tail.sh"
     else
         ERR_TAIL=''
     fi
@@ -204,7 +229,7 @@ if [ "${WATCH:-0}" = "1" ]; then
     if tmux list-windows -t "$SESSION_NAME" -F '#W' 2>/dev/null | grep -qx 'watch'; then
         echo "tmux window '$SESSION_NAME:watch' already exists — skipping watch spawn"
     else
-        WATCH_SCRIPT="/opt/work/sysadmin/llm-dev-sandbox/scripts/coordinator-watch.sh"
+        WATCH_SCRIPT="$LLM_SANDBOX_DIR/scripts/coordinator-watch.sh"
         # printf %q makes every value safe for re-parsing in the new shell,
         # which matters for OUTCOME_HOOK paths and prompts that may contain
         # spaces or quotes.

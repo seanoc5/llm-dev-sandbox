@@ -278,11 +278,11 @@ ONCE=1 coordinator-watch.sh
 | `DEBOUNCE_SECS` | `30` | Coalesce N events into 1 wake when many workers finish near-simultaneously |
 | `DRY_RUN` | `0` | Log triggers without invoking llm-start.sh |
 | `ONCE` | `0` | Exit after first wake — for smoke-tests |
-| `LLM_START` | `/opt/work/sysadmin/llm-dev-sandbox/llm-start.sh` | Override path |
+| `LLM_START` | `$LLM_SANDBOX_DIR/llm-start.sh` | Override path |
 | `WAKE_PROMPT` | (status-triage prompt; read-only) | What the coordinator does when woken |
 | `POLL_SECS` | `2` | Polling interval (polling backend only) |
 | `POST_OUTCOMES` | `0` | Set to `1` to also run `sweep-swarm-outcomes.sh` on each detected outcome. Honors `$OUTCOME_HOOK`. Fires outside the wake-debounce window so every outcome gets audit coverage even when wakes are coalesced. |
-| `SWEEP` | `/opt/work/sysadmin/llm-dev-sandbox/scripts/sweep-swarm-outcomes.sh` | Override sweep path |
+| `SWEEP` | `$LLM_SANDBOX_DIR/scripts/sweep-swarm-outcomes.sh` | Override sweep path |
 
 **Anti-runaway:** the default `WAKE_PROMPT` is read-only ("triage … decide next actions … do NOT dispatch new workers unless the user asked you to") and `DEBOUNCE_SECS` ensures back-to-back finishes don't N+1-loop the coordinator. Override `WAKE_PROMPT` if you want to hand more autonomy to the watcher.
 
@@ -408,7 +408,7 @@ Defines the coordinator's startup checklist (read `.swarm-policy.md` → `git st
 
 ```bash
 git worktree add ../wt-issue-42 -b fix/issue-42
-tmux new-window -d -n "iss-42" "/opt/work/sysadmin/llm-dev-sandbox/sandbox.sh ../wt-issue-42 listener"
+tmux new-window -d -n "iss-42" "$LLM_SANDBOX_DIR/sandbox.sh ../wt-issue-42 listener"
 echo "Fix issue #42. Details: $(gh issue view 42)" > ../wt-issue-42/.agent-task.md
 ```
 

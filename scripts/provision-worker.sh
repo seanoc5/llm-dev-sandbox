@@ -24,7 +24,11 @@ PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 WT="$(dirname "$PROJECT_DIR")/wt-issue-$ISSUE"
 BRANCH="fix/issue-$ISSUE"
 SESSION_NAME="llm-$(basename "$PROJECT_DIR")"
-SANDBOX_SH="${SANDBOX_SH:-/opt/work/sysadmin/llm-dev-sandbox/sandbox.sh}"
+# Self-locate so SANDBOX_SH default follows the script. Override with
+# SANDBOX_SH=<path> when running a non-standard install.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LLM_SANDBOX_DIR="${LLM_SANDBOX_DIR:-$(dirname "$SCRIPT_DIR")}"
+SANDBOX_SH="${SANDBOX_SH:-$LLM_SANDBOX_DIR/sandbox.sh}"
 
 echo "=== provision-worker.sh ==="
 echo "issue:      #$ISSUE"
