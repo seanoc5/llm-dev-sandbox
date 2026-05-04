@@ -12,6 +12,7 @@ VERBOSE=false
 [[ "${1:-}" == "-v" ]] && VERBOSE=true
 
 IMAGE="llm-sandbox:latest"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PASS=0
 FAIL=0
 SKIP=0
@@ -132,7 +133,7 @@ echo "[ sandbox.sh behaviour ]"
 # Test that sandbox.sh picks up the current dir as PROJECT_DIR
 output=$(bash -c '
     cd /tmp
-    out=$(PROJECT_DIR_CHECK=1 bash '"$(dirname "$0")"'/sandbox.sh 2>&1 | grep "Project:" | head -1)
+    out=$(PROJECT_DIR_CHECK=1 bash '"$REPO_ROOT"'/sandbox.sh 2>&1 | grep "Project:" | head -1)
     echo "$out"
 ' 2>&1) && [[ "$output" == *"/tmp"* ]] && pass "default PROJECT_DIR = PWD" || fail "default PROJECT_DIR = PWD" "$output"
 
