@@ -20,6 +20,17 @@ This sandbox supports a fully autonomous architecture managed via `tmux`:
 2.  **The Workers (Hands):** The Coordinator autonomously provisions background `tmux` windows containing isolated worker sandboxes (`claude` by default; `WORKER_CMD=gemini` switches the per-worker agent).
 3.  **The Communication:** The Coordinator drops task briefs into each worktree's `.swarm/tasks/inbox/` (the v2 queue protocol — atomic mktemp+mv writes, structured `done/*.json` outcomes). A background `worker-listener.sh` claims tasks one at a time, dispatches them to the worker LLM, and writes the outcome JSON. Coordinator monitors progress by polling `done/` and reading the worker's PRs via `gh`.
 
+## Worker Classes (Local vs GH Actions)
+
+Two execution surfaces exist for Claude workers, and the coordinator routes between them per issue:
+
+| Class                            | Locality      | Economics            | Presence              | Use for                                                 |
+|----------------------------------|---------------|----------------------|-----------------------|---------------------------------------------------------|
+| tmux/Docker workers (this repo)  | `--network host` | Claude Max OAuth      | Live tmux observation | Issues touching localhost / MCP, anything to babysit    |
+| `claude-code-action` (GH)        | Isolated runner | API-token billing    | Post-hoc Actions logs | Small isolated work, overnight runs, host-off scenarios |
+
+GH Actions does **not** replace the local swarm — it complements it. See [`adr/0001-claude-code-actions-as-third-worker-class.md`](./adr/0001-claude-code-actions-as-third-worker-class.md) for the decision rationale, routing rules, and rejected alternatives. A copy-paste workflow template lives at [`examples/github-workflows/claude-code.yml.example`](../examples/github-workflows/claude-code.yml.example).
+
 ## Open Source Landscape & Alternatives
 
 While you can build complex systems using Python frameworks like **CrewAI** or **LangGraph**, those frameworks often lack safe execution environments. This sandbox provides the missing execution layer.
