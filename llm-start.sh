@@ -15,6 +15,12 @@
 #                                     tmux window (carries POST_OUTCOMES,
 #                                     OUTCOME_HOOK, DEBOUNCE_SECS, etc.
 #                                     from caller env)
+#   STATUS=1                          Spawn gh-status-bar.sh in a 'status'
+#                                     tmux window — updates the session's
+#                                     status-right with live open-issue/
+#                                     open-PR/closed-today counts. Carries
+#                                     STATUS_INTERVAL, STATUS_LENGTH,
+#                                     STATUS_FORMAT, GH_TIMEOUT.
 #   NON_INTERACTIVE=1                 Don't auto-attach to the session
 set -euo pipefail
 
@@ -197,7 +203,7 @@ if ! $session_existed || $coordinator_idle; then
     # gemini agent stays alive after the prompt completes — exit it manually
     # with /quit or Ctrl-D when satisfied. claude is unaffected since its -p
     # is already verbose.
-    if [ "$COORD_CMD" = "gemini" ] && [ "${COORDINATOR_VERBOSE:-0}" = "1" ]; then
+    if [ "$COORD_CMD" = "gemini" ] && [ "${COORDINATOR_VERBOSE:-1}" = "1" ]; then
         PROMPT_FLAG="-i"
         echo "COORDINATOR_VERBOSE=1: gemini will stay interactive after the prompt; exit with /quit."
     else
@@ -225,7 +231,7 @@ fi
 # (so `WATCH=1 POST_OUTCOMES=1 OUTCOME_HOOK=/path ./llm-start.sh` gives
 # you coordinator + watcher + audit posting from a single invocation).
 # Idempotent: skips if a 'watch' window already exists in the session.
-if [ "${WATCH:-0}" = "1" ]; then
+if [ "${WATCH:-1}" = "1" ]; then
     if tmux list-windows -t "$SESSION_NAME" -F '#W' 2>/dev/null | grep -qx 'watch'; then
         echo "tmux window '$SESSION_NAME:watch' already exists — skipping watch spawn"
     else
@@ -244,6 +250,27 @@ if [ "${WATCH:-0}" = "1" ]; then
         if [ "${POST_OUTCOMES:-0}" = "1" ] && [ -z "${OUTCOME_HOOK:-}" ]; then
             echo "  WARN: POST_OUTCOMES=1 but no OUTCOME_HOOK set — sweep will use dry-run stub (no real posts)"
         fi
+    fi
+fi
+
+# Optionally spawn gh-status-bar.sh in a 'status' window. Updates the tmux
+# session's status-right with live open-issue / open-PR / closed-today
+# counts so they're visible from every window. Independent of WATCH — the
+# status bar polls gh on its own cadence (default 60s) regardless of
+# whether worker outcomes are landing.
+if [ "${STATUS:-0}" = "1" ]; then
+    if tmux list-windows -t "$SESSION_NAME" -F '#W' 2>/dev/null | grep -qx 'status'; then
+        echo "tmux window '$SESSION_NAME:status' already exists — skipping status spawn"
+    else
+        STATUS_SCRIPT="$LLM_SANDBOX_DIR/scripts/gh-status-bar.sh"
+        STATUS_CMD=""
+        for _v in STATUS_INTERVAL STATUS_LENGTH STATUS_FORMAT GH_TIMEOUT; do
+            _val="${!_v:-}"
+            [ -n "$_val" ] && STATUS_CMD+="$_v=$(printf '%q' "$_val") "
+        done
+        STATUS_CMD+="$STATUS_SCRIPT $(printf '%q' "$SESSION_NAME") $(printf '%q' "$PWD")"
+        tmux new-window -d -t "$SESSION_NAME" -n status "$STATUS_CMD"
+        echo "Spawned gh-status-bar in tmux window '$SESSION_NAME:status'"
     fi
 fi
 
