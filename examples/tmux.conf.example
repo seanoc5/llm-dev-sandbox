@@ -8,11 +8,13 @@
 
 # === Prefix key ============================================================
 # Default Ctrl-b conflicts with readline backward-char (annoying in shell).
-# Rebind to Ctrl-a (screen-compatible). If you're a heavy emacs user and
-# Ctrl-a is sacred, leave this commented out and stick with Ctrl-b.
+# Rebind to Ctrl-Space — unused by most shells/editors, easy to chord, and
+# doesn't collide with emacs (Ctrl-a) or screen muscle memory.
+# If your terminal eats Ctrl-Space (some IMEs do), Ctrl-a is the next-best
+# alternative; just swap C-Space for C-a in the three lines below.
 unbind C-b
-set -g prefix C-a
-bind C-a send-prefix     # Press Ctrl-a twice to send literal Ctrl-a
+set -g prefix C-Space
+bind C-Space send-prefix     # Press Ctrl-Space twice to send literal Ctrl-Space
 
 # === Sane defaults =========================================================
 
