@@ -1,0 +1,169 @@
+# tmux cheatsheet (for the swarm workflow)
+
+A short reference to the tmux commands that actually come up when you're running `llm-start.sh` and managing a worker swarm. Not exhaustive — see `man tmux` for the full surface.
+
+Conventions used below:
+- `Ctrl-b` = the default tmux **prefix key**. After pressing it (briefly) you then press the next key.
+- `<session>` = your swarm session name — typically `llm-<project-basename>` (e.g. `llm-fand-app`).
+
+---
+
+## 1. Attach to / detach from a running session
+
+| What                                                          | Command                                                                                       |
+|---------------------------------------------------------------|------------------------------------------------------------------------------------------------|
+| List sessions on this host                                    | `tmux ls`                                                                                      |
+| Attach (mirror — other clients stay attached)                 | `tmux attach -t <session>`                                                                     |
+| Attach AND detach any other clients first (clean handoff)     | `tmux attach -d -t <session>`                                                                  |
+| Detach yourself (leaves session running in background)        | Inside tmux: `Ctrl-b d`                                                                       |
+
+**Multi-attach / sizing**: tmux fits the session to the **smallest** attached client by default. If your laptop terminal is 120×40 and your desk monitor is 200×60, attaching from the laptop without `-d` will shrink the session to 120×40 in both terminals. Use `tmux attach -d -t …` to claim exclusive control, or use a session group (#10 below) for truly independent views.
+
+## 2. Session lifecycle
+
+| What                                                          | Command                                                                                       |
+|---------------------------------------------------------------|------------------------------------------------------------------------------------------------|
+| Kill one session                                              | `tmux kill-session -t <session>`                                                               |
+| Kill the tmux server entirely (all sessions)                  | `tmux kill-server`                                                                            |
+| Rename current session                                        | Inside tmux: `Ctrl-b $`                                                                        |
+| Check whether a session exists (scriptable)                   | `tmux has-session -t <session>` (exit 0 = exists)                                              |
+
+## 3. Window navigation (each `iss-N` worker is a window)
+
+| What                                                          | Command                                                                                       |
+|---------------------------------------------------------------|------------------------------------------------------------------------------------------------|
+| Next / previous window                                        | `Ctrl-b n` / `Ctrl-b p`                                                                       |
+| Jump to window by number                                      | `Ctrl-b 0` … `Ctrl-b 9`                                                                       |
+| Pick window from a list (with previews)                       | `Ctrl-b w`                                                                                    |
+| Find window by name (substring search)                        | `Ctrl-b f` then type `iss-215`                                                                 |
+| Show window number of currently-focused window                 | `Ctrl-b q`                                                                                     |
+
+## 4. Inspecting a worker without disturbing it (capture-pane)
+
+This is the key trick for diagnosing dead/stuck workers without scrolling around:
+
+```bash
+# Last 200 lines of a window's pane to your shell
+tmux capture-pane -t <session>:<window> -p -S -200
+
+# Last 50 lines, into less
+tmux capture-pane -t llm-fand-app:iss-215 -p -S -50 | less
+
+# Full scrollback (huge — pipe to a file)
+tmux capture-pane -t <session>:<window> -p -S - > /tmp/iss-215-full.log
+```
+
+`-p` = print to stdout; `-S -N` = start N lines back in the scrollback buffer; omit `-S` for current pane only.
+
+## 5. Scrollback / search inside a window (interactive)
+
+| What                                                          | Command                                                                                       |
+|---------------------------------------------------------------|------------------------------------------------------------------------------------------------|
+| Enter copy/scrollback mode                                    | `Ctrl-b [`                                                                                    |
+| Scroll up / down (in copy mode)                                | `PgUp` / `PgDn`, or arrow keys                                                                 |
+| Search backward                                                | `Ctrl-r` then type term, `Enter`                                                               |
+| Search forward                                                 | `Ctrl-s`                                                                                       |
+| Exit copy mode                                                 | `q`                                                                                            |
+
+## 6. Killing a single window (worker)
+
+```bash
+tmux kill-window -t <session>:<window>     # specific window
+tmux kill-window -t llm-fand-app:iss-215   # the iss-215 worker
+```
+
+For bulk worker cleanup, use [`scripts/kill-finished-workers.sh`](../scripts/kill-finished-workers.sh) — it handles parked-only filtering, PR-safety, and confirmation prompts.
+
+## 7. Send a command into a window from outside
+
+Useful for waking the coordinator without attaching:
+
+```bash
+# Type a command + press Enter into a specific window's pane
+tmux send-keys -t llm-fand-app:coordinator "claude --resume <id>" Enter
+```
+
+`Enter` (or `C-m`) is what actually runs the command. Without it, the text just sits at the prompt.
+
+## 8. List windows / panes (scriptable inspection)
+
+```bash
+# All windows in a session, with names
+tmux list-windows -t <session> -F '#{window_index} #{window_name} #{pane_current_command}'
+
+# Every pane across every session, with state flags
+tmux list-panes -a -F '#{session_name}:#{window_name} cmd=#{pane_current_command} dead=#{pane_dead}'
+
+# Idle time in seconds for each window (uses last-activity timestamp)
+tmux list-windows -t <session> -F '#{window_name} idle=#{e|-:#{t:#{window_activity}},#{t:now}}s'
+```
+
+The `dead=1` flag is what we look for when a watcher pane crashes and shows "Pane is dead (status N)".
+
+## 9. Resurrect a dead pane (rerun the command in-place)
+
+When you see `Pane is dead (status 1, ...)`:
+
+```bash
+# Just close it and re-spawn the window
+tmux kill-window -t llm-fand-app:watch
+tmux new-window -t llm-fand-app -n watch \
+    "/opt/work/sysadmin/llm-dev-sandbox/scripts/coordinator-watch.sh /opt/work/oconeco/fand-app"
+
+# OR with the alternative respawn-pane (preserves window number, scrollback gone):
+tmux respawn-pane -k -t llm-fand-app:watch \
+    "/opt/work/sysadmin/llm-dev-sandbox/scripts/coordinator-watch.sh /opt/work/oconeco/fand-app"
+```
+
+`respawn-pane -k` kills any process in the pane first; without `-k` it errors if the pane already has a live process.
+
+## 10. Session groups (independent views across attached clients)
+
+If you genuinely need two terminals viewing different windows of the same session simultaneously (e.g., laptop watching `iss-215` while desk shows `coordinator`):
+
+```bash
+# Create a "linked" session that shares windows but allows independent focus
+tmux new-session -t llm-fand-app -s llm-fand-app-2
+
+# Then on the second terminal:
+tmux attach -t llm-fand-app-2
+
+# Both sessions see the same windows. Each terminal can be on a different
+# window. Killing a window kills it in both. Killing one session leaves
+# the other intact.
+```
+
+Useful for the laptop+desk scenario where you don't want size-fighting AND don't want to mirror.
+
+---
+
+## Common scenarios in this project
+
+| Scenario                                                                       | Command                                                                                                            |
+|--------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
+| SSH'd in from a different machine, want to take over from the local terminal   | `tmux attach -d -t llm-<project>`                                                                                  |
+| Watch a worker's progress without leaving your current shell                    | `tmux capture-pane -t llm-<project>:iss-215 -p -S -50`                                                              |
+| Worker pane shows "Pane is dead" — what was the last output?                    | `tmux capture-pane -t llm-<project>:<window> -p -S -200`                                                            |
+| All 5 workers finished; want to clean up                                        | `kill-finished-workers.sh --dry-run` then `kill-finished-workers.sh`                                                |
+| Forgot to detach before closing terminal — session still running?               | `tmux ls` (it survived; just `tmux attach`)                                                                        |
+| Need to nuke EVERYTHING and start over                                          | `tmux kill-session -t llm-<project>` (or `tmux kill-server` for all sessions on the host)                          |
+| Want a separate "control" terminal that drives the coordinator from outside    | `tmux send-keys -t llm-<project>:coordinator "<your prompt>" Enter`                                                |
+
+## Customizing tmux for this workflow
+
+A starter config tuned for the swarm — bigger scrollback (50000 lines, so `capture-pane -S -50000` actually has history to capture), 1-indexed windows, mouse mode, vi-style copy bindings, and a Ctrl-a prefix rebind — lives at [`examples/tmux.conf.example`](../examples/tmux.conf.example). Each block is independent; copy what you want:
+
+```bash
+cp examples/tmux.conf.example ~/.tmux.conf
+tmux source-file ~/.tmux.conf      # reload in a running session
+```
+
+If you only want the prefix rebind and nothing else, the minimum is three lines:
+
+```tmux
+unbind C-b
+set -g prefix C-a
+bind C-a send-prefix
+```
+
+(One last `Ctrl-b` before the rebind takes effect for the current session.)

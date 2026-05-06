@@ -2,6 +2,8 @@
 
 Common issues and their resolutions. If you hit something not covered here, please open an issue against the repo so we can add it.
 
+> **Tip:** for general tmux usage (attach/detach, multi-client handling, capturing pane scrollback for diagnosis, killing dead panes), see [`tmux-cheatsheet.md`](./tmux-cheatsheet.md). Many of the diagnostic commands referenced below assume familiarity with `tmux capture-pane -p -S -N` and `tmux list-windows`.
+
 ## Contents
 
 - [Auth & Plan Availability](#auth--plan-availability)

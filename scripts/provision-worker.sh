@@ -18,7 +18,54 @@
 # id so the listener processes it as a follow-up.
 set -euo pipefail
 
-ISSUE="${1:?usage: provision-worker.sh <issue-number> [project-dir]}"
+# --- Help / usage ---
+case "${1:-}" in
+    -h|--help)
+        cat <<EOF
+provision-worker.sh — Provision a worker for one GitHub issue
+
+USAGE
+    provision-worker.sh <issue-number> [project-dir]
+
+ARGUMENTS
+    issue-number    GitHub issue number to dispatch (required)
+    project-dir     Path to project root (default: \$PWD)
+
+DESCRIPTION
+    One-call helper for the coordinator. Creates worktree at
+    <parent>/wt-issue-N on branch fix/issue-N (idempotent), initializes
+    the v2 queue, embeds .swarm-policy.md guardrails into the brief,
+    atomic-writes the task into inbox/, and spawns a worker tmux window
+    'iss-N' running the sandbox listener.
+
+CAP ENFORCEMENT (exit 3 on either)
+    MAX_WORKERS         alive iss-* windows < cap         (default 2)
+    MAX_TMUX_WINDOWS    total session windows < cap       (default 10)
+    Both are checked just before the new tmux window would be created.
+    Re-running for an existing iss-N window does NOT count against caps —
+    that path queues a follow-up task without adding capacity.
+
+CONFIG  (precedence: shell env > <project>/.swarm/.env > <sandbox>/.env.example)
+    MAX_WORKERS         2         worker tmux window cap
+    MAX_TMUX_WINDOWS    10        total session window cap
+    SANDBOX_SH          (auto)    path to sandbox.sh used by the listener
+    LLM_SANDBOX_DIR     (auto)    sandbox install dir
+
+EVENTS LOG
+    Appends to <project>/.swarm/events.log:
+      worker.start     new iss-N window created (alive=A/MAX, total=W/MAX)
+      worker.requeue   existing iss-N window reused for follow-up task
+      cap.refused      MAX_WORKERS or MAX_TMUX_WINDOWS would be exceeded
+
+EXAMPLES
+    provision-worker.sh 142                 # dispatch issue #142 from \$PWD
+    provision-worker.sh 142 /path/to/proj   # explicit project dir
+EOF
+        exit 0
+        ;;
+esac
+
+ISSUE="${1:?usage: provision-worker.sh <issue-number> [project-dir]   (try --help)}"
 PROJECT_DIR="${2:-$PWD}"
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 WT="$(dirname "$PROJECT_DIR")/wt-issue-$ISSUE"
@@ -29,6 +76,26 @@ SESSION_NAME="llm-$(basename "$PROJECT_DIR")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LLM_SANDBOX_DIR="${LLM_SANDBOX_DIR:-$(dirname "$SCRIPT_DIR")}"
 SANDBOX_SH="${SANDBOX_SH:-$LLM_SANDBOX_DIR/sandbox.sh}"
+
+# Apply <project>/.swarm/.env then sandbox .env.example before reading caps,
+# so caller env > project file > sandbox defaults. Normally the tmux session
+# already has these exported (set by llm-start.sh), but the explicit load
+# lets the script run correctly when invoked standalone.
+# shellcheck source=_load-env.sh
+. "$SCRIPT_DIR/_load-env.sh" "$PROJECT_DIR"
+
+MAX_WORKERS="${MAX_WORKERS:-2}"
+MAX_TMUX_WINDOWS="${MAX_TMUX_WINDOWS:-10}"
+
+# Append-only structured event log. Same format as coordinator-watch.sh.
+EVENTS_LOG="$PROJECT_DIR/.swarm/events.log"
+mkdir -p "$(dirname "$EVENTS_LOG")" 2>/dev/null || true
+log_event() {
+    local cat="$1"; shift
+    local ts
+    ts="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+    printf '%s  %-15s %s\n' "$ts" "$cat" "$*" >> "$EVENTS_LOG" 2>/dev/null || true
+}
 
 echo "=== provision-worker.sh ==="
 echo "issue:      #$ISSUE"
@@ -104,13 +171,35 @@ if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
     exit 2
 fi
 
-# Skip if a window for this issue already exists
+# Skip if a window for this issue already exists — caps don't apply
+# because we're not adding capacity, just queueing a follow-up task.
 if tmux list-windows -t "$SESSION_NAME" -F '#W' 2>/dev/null | grep -qx "iss-$ISSUE"; then
     echo "[4/4] tmux window iss-$ISSUE already exists — listener will pick up the new task"
+    log_event worker.requeue "issue=$ISSUE task_id=$TASK_ID"
 else
+    # Cap enforcement: count alive workers (iss-*) and total windows BEFORE
+    # the spawn. Refuse with exit 3 if either cap would be exceeded. The
+    # coordinator catches non-zero exits and reports back to the user.
+    alive_workers=$(tmux list-windows -t "$SESSION_NAME" -F '#W' 2>/dev/null | grep -c '^iss-' || true)
+    total_windows=$(tmux list-windows -t "$SESSION_NAME" -F '#W' 2>/dev/null | wc -l)
+    if [ "$alive_workers" -ge "$MAX_WORKERS" ]; then
+        echo "ERROR: MAX_WORKERS cap reached (alive=$alive_workers, max=$MAX_WORKERS)" >&2
+        echo "       Wait for a worker to finish, or raise MAX_WORKERS in <project>/.swarm/.env." >&2
+        log_event cap.refused "issue=$ISSUE reason=max_workers alive=$alive_workers max=$MAX_WORKERS"
+        exit 3
+    fi
+    if [ "$total_windows" -ge "$MAX_TMUX_WINDOWS" ]; then
+        echo "ERROR: MAX_TMUX_WINDOWS cap reached (total=$total_windows, max=$MAX_TMUX_WINDOWS)" >&2
+        echo "       Close finished iss-* windows: tmux kill-window -t '$SESSION_NAME:iss-NN'" >&2
+        echo "       Or raise MAX_TMUX_WINDOWS in <project>/.swarm/.env." >&2
+        log_event cap.refused "issue=$ISSUE reason=max_tmux_windows total=$total_windows max=$MAX_TMUX_WINDOWS"
+        exit 3
+    fi
+
     tmux new-window -d -t "$SESSION_NAME" -n "iss-$ISSUE" \
         "$SANDBOX_SH $WT listener"
     echo "[4/4] tmux window iss-$ISSUE spawned (listener)"
+    log_event worker.start "issue=$ISSUE task_id=$TASK_ID window=iss-$ISSUE alive=$((alive_workers + 1))/$MAX_WORKERS total_windows=$((total_windows + 1))/$MAX_TMUX_WINDOWS"
 fi
 
 echo
@@ -118,3 +207,4 @@ echo "Provisioned worker for issue #$ISSUE."
 echo "  task_id: $TASK_ID"
 echo "  worker: tmux window '$SESSION_NAME:iss-$ISSUE'"
 echo "  monitor: ls $WT/.swarm/tasks/done/"
+echo "  events:  tail -F $EVENTS_LOG"

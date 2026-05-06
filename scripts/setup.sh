@@ -78,4 +78,12 @@ if [ "${LLM_SANDBOX_DIR_ENV:-${LLM_SANDBOX_DIR_ENV_VAR:-}}" != "$LLM_SANDBOX_DIR
     echo
 fi
 
+# --- 6. Bash completion install hint --------------------------------------
+COMPLETION_FILE="$LLM_SANDBOX_DIR/completions/llm-dev-sandbox.bash"
+if [ -f "$COMPLETION_FILE" ]; then
+    yellow "Tip: enable tab-completion for llm-start.sh / coordinator-watch.sh / provision-worker.sh:"
+    echo "    . \"$COMPLETION_FILE\"   # add to ~/.bashrc"
+    echo
+fi
+
 green "Setup complete."

@@ -33,7 +33,133 @@ LLM_SANDBOX_DIR="${LLM_SANDBOX_DIR:-$SCRIPT_DIR}"
 
 SESSION_NAME="llm-$(basename "$PWD")"
 SYSTEM_PROMPT_FILE="$LLM_SANDBOX_DIR/prompts/coordinator.md"
+
+# --- Help / usage ----------------------------------------------------------
+
+usage() {
+    cat <<EOF
+llm-start.sh — Bootstrap a multi-agent tmux coordinator session
+
+USAGE
+    llm-start.sh [FLAGS] [PROMPT]
+
+ARGUMENTS
+    PROMPT          Initial prompt for the coordinator
+                    (default: "Execute the Initial Startup Checklist.")
+
+FLAGS
+    -h, --help                       Show this help and exit
+    -w, --watch                      Spawn coordinator-watch.sh   (= WATCH=1)
+    -y, --yolo                       Opinionated automation bundle (see below)
+        --status                     Spawn gh-status-bar window   (= STATUS=1)
+        --max-workers N              Concurrent worker tmux windows
+        --max-windows N              Total session window cap (HARD)
+        --target-available N         AVAILABLE backlog target
+        --include-others             Claim others' tickets        (= INCLUDE_ASSIGNED_TO_OTHERS=1)
+        --owner-labels L1,L2         Comma-sep labels meaning "human-owned"
+
+YOLO BUNDLE
+    --yolo sets, only when not already set: WATCH=1 STATUS=1 MAX_WORKERS=5
+    INCLUDE_ASSIGNED_TO_OTHERS=1 DEBOUNCE_SECS=15.
+    Explicit flags and shell env still win, so 'MAX_WORKERS=8 ./llm-start.sh
+    --yolo' gives 8 workers. MAX_TMUX_WINDOWS stays at 10 — the runaway
+    brake is never disabled by yolo.
+
+ENV VARS  (precedence: flag > shell env > <project>/.swarm/.env > <sandbox>/.env.example)
+
+  Coordinator
+    COORDINATOR_CMD              claude    claude | gemini
+    COORDINATOR_MODEL            (varies)  per-coordinator default
+    COORDINATOR_VERBOSE          0         gemini -i instead of -p
+    COORDINATOR_USE_API_KEY      0         keep ANTHROPIC_API_KEY (bills API)
+
+  Caps & filters  [also loadable from <project>/.swarm/.env]
+    MAX_WORKERS                  2         concurrent worker tmux windows
+    MAX_TMUX_WINDOWS             10        total session window cap (HARD)
+    TARGET_AVAILABLE             5         AVAILABLE backlog target
+    OWNER_LABELS                 (empty)   comma-sep labels = "human-owned"
+    INCLUDE_ASSIGNED_TO_OTHERS   0         1 = claim others' tickets
+
+  Watcher (when WATCH=1)
+    WATCH                        0         spawn coordinator-watch.sh
+    DEBOUNCE_SECS                30        wake coalescing window
+    POLL_SECS                    2         poll-mode latency
+    POST_OUTCOMES                0         run sweep on each outcome
+    OUTCOME_HOOK                 (none)    path to per-outcome poster script
+
+  Misc
+    STATUS                       0         spawn gh-status-bar window
+    NON_INTERACTIVE              0         don't auto-attach (for tests)
+
+EXAMPLES
+    ./llm-start.sh                              # one-shot triage, defaults
+    ./llm-start.sh -w                           # one-shot + auto top-up
+    ./llm-start.sh --yolo                       # unattended sprint mode
+    ./llm-start.sh --max-workers 8 -w           # 8 workers, watcher on
+    MAX_WORKERS=8 ./llm-start.sh --yolo         # 8 (env wins over yolo's 5)
+    ./llm-start.sh "claim Radesh's tickets"     # free-text override
+
+DOCS
+    README:    $LLM_SANDBOX_DIR/README.md
+    Overview:  $LLM_SANDBOX_DIR/docs/llm-dev-sandbox-overview.md
+EOF
+}
+
+# --- Flag parsing ----------------------------------------------------------
+# Flags export immediately, beating shell env (so --max-workers 10 wins over
+# MAX_WORKERS=8). The env loader (sourced after this loop) only sets unset
+# vars, giving the standard precedence: flag > shell env > project .env >
+# sandbox .env.example.
+
+require_value() {
+    if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
+        echo "ERROR: $1 requires a value" >&2
+        exit 1
+    fi
+}
+
+YOLO=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)              usage; exit 0 ;;
+        -w|--watch)             export WATCH=1; shift ;;
+        -y|--yolo)              YOLO=1; shift ;;
+        --status)               export STATUS=1; shift ;;
+        --include-others)       export INCLUDE_ASSIGNED_TO_OTHERS=1; shift ;;
+        --max-workers)          require_value "$1" "${2:-}"; export MAX_WORKERS="$2"; shift 2 ;;
+        --max-workers=*)        export MAX_WORKERS="${1#*=}"; shift ;;
+        --max-windows)          require_value "$1" "${2:-}"; export MAX_TMUX_WINDOWS="$2"; shift 2 ;;
+        --max-windows=*)        export MAX_TMUX_WINDOWS="${1#*=}"; shift ;;
+        --target-available)     require_value "$1" "${2:-}"; export TARGET_AVAILABLE="$2"; shift 2 ;;
+        --target-available=*)   export TARGET_AVAILABLE="${1#*=}"; shift ;;
+        --owner-labels)         require_value "$1" "${2:-}"; export OWNER_LABELS="$2"; shift 2 ;;
+        --owner-labels=*)       export OWNER_LABELS="${1#*=}"; shift ;;
+        --)                     shift; break ;;
+        -*)                     echo "ERROR: unknown flag: $1 (try --help)" >&2; exit 1 ;;
+        *)                      break ;;   # positional PROMPT starts here
+    esac
+done
+
+# --yolo bundle: apply opinionated defaults AFTER explicit flags. The
+# `:= ` form only sets when unset, so any flag/env value the user already
+# supplied wins. MAX_TMUX_WINDOWS deliberately not bumped — runaway brake
+# is never relaxed by yolo.
+if [ "$YOLO" = "1" ]; then
+    : "${WATCH:=1}";                      export WATCH
+    : "${STATUS:=1}";                     export STATUS
+    : "${MAX_WORKERS:=5}";                export MAX_WORKERS
+    : "${INCLUDE_ASSIGNED_TO_OTHERS:=1}"; export INCLUDE_ASSIGNED_TO_OTHERS
+    : "${DEBOUNCE_SECS:=15}";             export DEBOUNCE_SECS
+fi
+
 INITIAL_PROMPT="${1:-Execute the Initial Startup Checklist.}"
+
+# Load <project>/.swarm/.env then <sandbox>/.env.example. Vars set above by
+# flags or yolo (or by the caller's shell env) survive — the loader only
+# fills in still-unset vars. Final precedence:
+#   flag > shell env > <project>/.swarm/.env > <sandbox>/.env.example
+# shellcheck source=scripts/_load-env.sh
+. "$LLM_SANDBOX_DIR/scripts/_load-env.sh" "$PWD"
 
 # Allow overriding the coordinator command and model
 COORD_CMD="${COORDINATOR_CMD:-claude}"
@@ -141,6 +267,16 @@ if ! $session_existed; then
     if [ -n "${WORKER_HEADLESS:-}" ]; then
         TMUX_ENV_OPTS+=(-e "WORKER_HEADLESS=$WORKER_HEADLESS")
     fi
+    # Propagate sandbox config into the session so the coordinator LLM and
+    # any provision-worker.sh invocations within the session see the same
+    # caps and filters loaded from .env.example / .swarm/.env above.
+    for _v in MAX_WORKERS MAX_TMUX_WINDOWS TARGET_AVAILABLE OWNER_LABELS \
+              INCLUDE_ASSIGNED_TO_OTHERS DEBOUNCE_SECS POLL_SECS \
+              LLM_SANDBOX_DIR; do
+        _val="${!_v:-}"
+        [ -n "$_val" ] && TMUX_ENV_OPTS+=(-e "$_v=$_val")
+    done
+    unset _v _val
     if [ -n "$GEMINI_ENV_SOURCED" ]; then
         echo "Loaded GEMINI_API_KEY from $GEMINI_ENV_SOURCED"
     fi

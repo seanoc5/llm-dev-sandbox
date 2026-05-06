@@ -46,6 +46,12 @@ PROCESSING="$QUEUE_ROOT/processing"
 DONE="$QUEUE_ROOT/done"
 mkdir -p "$INBOX" "$PROCESSING" "$DONE"
 
+# Per-worktree label used in user-visible messages so it's obvious which
+# worktree's inbox this listener is bound to (and that it does NOT serve
+# briefs for other issues — those need their own provision-worker.sh /
+# worktree). E.g. "wt-issue-215".
+WT_LABEL="$(basename "$PWD")"
+
 # Legacy v1 file
 LEGACY_TASK_FILE=".agent-task.md"
 
@@ -60,6 +66,7 @@ if [ -n "$MODEL" ]; then
 fi
 
 echo "--- Worker Listener Active ---"
+echo "Worktree: $WT_LABEL  (this listener serves ONLY $WT_LABEL's inbox)"
 echo "Agent:    $AGENT${MODEL:+ (model: $MODEL)}"
 echo "Mode:     $([ "$HEADLESS" = "1" ] && echo headless || echo interactive)"
 echo "Queue:    $INBOX/  →  $PROCESSING/  →  $DONE/"
@@ -203,7 +210,7 @@ while true; do
         fi
 
         echo "------------------------------"
-        echo "[$(date +%T)] Task complete (exit $RC, ${DURATION}s). Waiting for next..."
+        echo "[$(date +%T)] Task complete (exit $RC, ${DURATION}s). Waiting for next brief in $WT_LABEL/$INBOX/ — use 'requeue.sh ${WT_LABEL#wt-issue-} <brief>' to send a follow-up on this issue. (Different issues need their own worktree via provision-worker.sh.)"
     fi
     sleep 2
 done

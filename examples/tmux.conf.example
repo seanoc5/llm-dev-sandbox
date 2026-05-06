@@ -1,0 +1,83 @@
+# tmux.conf.example — starter config tuned for the llm-dev-sandbox swarm workflow
+#
+# Copy to your home dir and reload:
+#     cp examples/tmux.conf.example ~/.tmux.conf
+#     tmux source-file ~/.tmux.conf            # reload in a running session
+#
+# Each block is independent — keep what you like, delete the rest.
+
+# === Prefix key ============================================================
+# Default Ctrl-b conflicts with readline backward-char (annoying in shell).
+# Rebind to Ctrl-a (screen-compatible). If you're a heavy emacs user and
+# Ctrl-a is sacred, leave this commented out and stick with Ctrl-b.
+unbind C-b
+set -g prefix C-a
+bind C-a send-prefix     # Press Ctrl-a twice to send literal Ctrl-a
+
+# === Sane defaults =========================================================
+
+# Bigger scrollback buffer. The default is 2000 lines, which fills up fast
+# when a Claude worker is mid-session. capture-pane -S -50000 lets you
+# inspect the full history of a busy worker without losing context.
+set -g history-limit 50000
+
+# Reduce the escape-time so vim and other terminal apps respond instantly
+# to ESC. Default 500ms makes ESC-based bindings feel laggy.
+set -sg escape-time 10
+
+# 1-index windows + panes (matches the number row on the keyboard so
+# Prefix-1 jumps to the first window, not the second).
+set -g base-index 1
+setw -g pane-base-index 1
+
+# Renumber windows after one is closed, so killing iss-215 doesn't leave
+# a gap at index 3. Useful when you bulk-close finished workers.
+set -g renumber-windows on
+
+# Show window activity (a `*` next to a window in the status bar when
+# something printed there since you last looked). Helpful for tracking
+# which workers just produced output.
+setw -g monitor-activity on
+set -g visual-activity off    # Don't actively beep/flash; just annotate
+
+# === Mouse mode ============================================================
+# Click to switch panes/windows, scroll wheel to enter copy mode and
+# scrollback. Disable if you hate it; some users find it interferes with
+# their terminal's native mouse selection.
+set -g mouse on
+
+# === Vi-style copy mode (optional) =========================================
+# Comment this block out if you prefer emacs-style bindings.
+setw -g mode-keys vi
+bind-key -T copy-mode-vi v send-keys -X begin-selection
+bind-key -T copy-mode-vi y send-keys -X copy-pipe-and-cancel "xclip -in -selection clipboard"
+# (Replace `xclip` with `pbcopy` on macOS or `wl-copy` on Wayland.)
+
+# === Multi-client sizing ===================================================
+# When two clients of different sizes are attached to the same session,
+# tmux fits to the smaller. `aggressive-resize` makes that per-window
+# rather than per-session — windows currently focused by the smaller
+# client shrink, but other windows keep the larger client's dimensions.
+# Trade-off: helps the laptop+desk scenario but can confuse some apps.
+setw -g aggressive-resize on
+
+# === Status bar ============================================================
+# Default status bar is fine; these tweaks make the swarm session info
+# more visible. Window names stay short so iss-215 etc. fit cleanly.
+set -g status-interval 5
+set -g status-left  "#[bold]#S#[default] | "
+set -g status-left-length 30
+set -g status-right "#[fg=cyan]%H:%M #[fg=default]%Y-%m-%d"
+setw -g window-status-format          " #I:#W "
+setw -g window-status-current-format  "#[reverse] #I:#W #[default]"
+
+# === Quick reload key ======================================================
+# Prefix-r reloads this config without restarting tmux.
+bind r source-file ~/.tmux.conf \; display-message "~/.tmux.conf reloaded"
+
+# === Project-specific window-name tweaks ===================================
+# When `llm-start.sh` spawns iss-N windows via `gh-status-bar.sh`, the
+# session's status-right gets overwritten with live counts. To preserve
+# your timestamp display in non-swarm sessions, the gh-status-bar script
+# only modifies its own session — your other sessions stay as configured
+# above.
