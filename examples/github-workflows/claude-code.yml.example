@@ -1,0 +1,98 @@
+# Copy to <your-project>/.github/workflows/claude-code.yml
+#
+# Triggers `anthropics/claude-code-action` on:
+#   1. @claude mentions in issue/PR comments
+#   2. issues labeled `claude-action` (the coordinator applies this label
+#      when routing to the Actions worker class — see ADR-0001)
+#   3. manual workflow_dispatch
+#
+# This is the GH Actions counterpart to the local tmux swarm. Use for:
+#   - small, isolated work (docs, dep bumps, pure-logic tests)
+#   - overnight runs while the host is off
+#   - issues that DON'T need localhost services / MCP / OpenBrain
+#
+# See docs/adr/0001-claude-code-actions-as-third-worker-class.md for the
+# decision rationale and routing rules.
+
+name: Claude Code
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, labeled, assigned]
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'Prompt for Claude'
+        required: true
+        type: string
+
+# Hard concurrency cap — one Claude run per issue/PR at a time.
+# Prevents an @claude reply from racing a label-trigger run.
+concurrency:
+  group: claude-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  claude:
+    # Run only when:
+    #  - a comment mentions @claude, OR
+    #  - the `claude-action` label is applied/an issue is opened with it, OR
+    #  - manually dispatched.
+    # The author allowlist is a defense-in-depth measure — even if someone
+    # opens a PR from a fork, only collaborators can trigger a run.
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.labels.*.name, 'claude-action') || contains(github.event.issue.body, '@claude'))) ||
+      github.event_name == 'workflow_dispatch'
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write          # let Claude push branches
+      pull-requests: write     # let Claude open PRs
+      issues: write            # let Claude comment on issues
+      id-token: write          # for OIDC if you switch to Bedrock/Vertex
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # SECURITY:
+      #  - ANTHROPIC_API_KEY must be a repo secret (Settings → Secrets → Actions).
+      #  - Public-repo `pull_request_target` flows are NOT enabled here on purpose.
+      #    If you add them, gate on `github.event.pull_request.author_association`
+      #    and require label-based opt-in for forked PRs. See:
+      #    https://securitylab.github.com/research/github-actions-preventing-pwn-requests/
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Optional: pin a model. Default is Anthropic's recommended general-purpose model.
+          # model: claude-sonnet-4-6
+          # Optional: override the trigger phrase from `@claude` to something else.
+          # trigger_phrase: "@claude-bot"
+          # Optional: pass a prompt explicitly (mainly for workflow_dispatch).
+          # prompt: ${{ github.event.inputs.prompt }}
+
+# ============================================================================
+# Hardening checklist (per project — review before enabling on a public repo):
+# ----------------------------------------------------------------------------
+# [ ] ANTHROPIC_API_KEY stored as a repo Actions secret, not env var.
+# [ ] Workflow file is on the default branch only (not editable via PR).
+# [ ] Required reviewers configured in branch protection so Claude's PRs
+#     can't auto-merge without human approval.
+# [ ] Concurrency group above limits parallel Claude runs per issue/PR.
+# [ ] If repo is public: do NOT add `pull_request_target` triggers without
+#     adding an author/label allowlist — see linked GitHub Security Lab post.
+# [ ] Set Actions → General → "Fork pull request workflows from outside
+#     collaborators" → "Require approval for first-time contributors".
+# [ ] Audit Actions logs after the first few runs to confirm Claude isn't
+#     leaking the API key or repo secrets into PR descriptions / commit msgs.
+# ============================================================================
