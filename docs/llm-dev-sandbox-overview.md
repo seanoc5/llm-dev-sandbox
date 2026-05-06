@@ -85,7 +85,7 @@ Generalized launcher: `sandbox.sh <project-dir> <agent> [extra-args]`
 
 Creates `tmux` session `llm-<basename-of-cwd>` if missing, opens window 1 as `coordinator`, and launches the configured coordinator command in headless print mode (`-p`) with the initial prompt and the system prompt from `prompts/coordinator.md`.
 
-Optionally also spawns `coordinator-watch.sh` in window 2 (`watch`) when `WATCH=1`. The watcher inherits `POST_OUTCOMES`, `OUTCOME_HOOK`, `DEBOUNCE_SECS`, `WAKE_PROMPT`, `POLL_SECS`, `WORKSPACE`, and `SWEEP` from the caller's env, so:
+Optionally also spawns `coordinator-watch.sh` in window 2 (`watch`) when `WATCH=1`. The watcher inherits `POST_OUTCOMES`, `OUTCOME_HOOK`, `DEBOUNCE_SECS`, `WAKE_PROMPT`, `POLL_SECS`, `WORKSPACE`, and `SWEEP` directly from the caller's env, plus `MAX_WORKERS`, `MAX_TMUX_WINDOWS`, `TARGET_AVAILABLE`, `OWNER_LABELS`, and `INCLUDE_ASSIGNED_TO_OTHERS` via the tmux session env (set by `tmux new-session -e` after `llm-start.sh` loads `<project>/.swarm/.env` + `.env.example`). So:
 
 ```bash
 WATCH=1 POST_OUTCOMES=1 OUTCOME_HOOK=/path/to/poster ./llm-start.sh
@@ -103,15 +103,52 @@ When the session already exists, `llm-start.sh` inspects the coordinator pane's 
 
 This means you can re-invoke `llm-start.sh` repeatedly with new prompts without thinking about state cleanup.
 
+#### CLI flags
+
+`llm-start.sh --help` prints the canonical reference. Summary:
+
+| Flag                    | Equivalent env                  | Notes                                                                  |
+|-------------------------|---------------------------------|------------------------------------------------------------------------|
+| `-h`, `--help`          | n/a                             | Full reference (env vars, yolo bundle, examples)                       |
+| `-w`, `--watch`         | `WATCH=1`                       | Spawn `coordinator-watch.sh` in window 2                                |
+| `-y`, `--yolo`          | (bundle — see below)            | Opinionated automation; explicit flags + shell env still win            |
+| `--status`              | `STATUS=1`                      | Spawn `gh-status-bar.sh` in window 3                                    |
+| `--max-workers N`       | `MAX_WORKERS=N`                 | Concurrent worker tmux windows (default 2)                              |
+| `--max-windows N`       | `MAX_TMUX_WINDOWS=N`            | Total session window cap (default 10) — runaway brake                  |
+| `--target-available N`  | `TARGET_AVAILABLE=N`            | Backlog target; `0` disables auto-issue-creation                        |
+| `--include-others`      | `INCLUDE_ASSIGNED_TO_OTHERS=1`  | Claim teammates' tickets too                                            |
+| `--owner-labels L1,L2`  | `OWNER_LABELS=L1,L2`            | Comma-sep "human-owned" labels                                          |
+
+Both forms accepted: `--max-workers 8` and `--max-workers=8`.
+
+**Precedence:** flag > shell env > `<project>/.swarm/.env` > `<sandbox>/.env.example`. Implementation: flags `export` directly (overwriting any shell-env value), then `_load-env.sh` runs and only fills *unset* vars. So `MAX_WORKERS=8 ./llm-start.sh --max-workers=10` ⇒ `MAX_WORKERS=10`.
+
+**`--yolo` bundle** (only sets unset vars, so explicit flags + caller env still win):
+
+```
+WATCH=1  STATUS=1  MAX_WORKERS=5  INCLUDE_ASSIGNED_TO_OTHERS=1  DEBOUNCE_SECS=15
+```
+
+`MAX_TMUX_WINDOWS` is deliberately **not** bumped by `--yolo` — the runaway brake stays at 10 even in unattended-sprint mode.
+
 #### Env vars
 
-| Variable                  | Default            | Notes                                                                                            |
-|---------------------------|--------------------|--------------------------------------------------------------------------------------------------|
-| `COORDINATOR_CMD`         | `gemini`           | `gemini`, `claude`, or any custom CLI                                                            |
-| `COORDINATOR_MODEL`       | `gemini-2.5-flash` | Only consumed when `COORDINATOR_CMD=gemini`. Stable; `gemini-3-flash-preview` is broken on multi-tool sequences (server-side INVALID_ARGUMENT). |
-| `COORDINATOR_VERBOSE`     | `0`                | When `1` and using gemini: swaps `-p` for `-i` (`--prompt-interactive`) so tool calls are visible live in the pane. Agent stays alive — exit with `/quit`. claude is unaffected (its `-p` already streams). |
-| `COORDINATOR_USE_API_KEY` | `0`                | When `1` and using claude: keeps `ANTHROPIC_API_KEY` in the agent's env (bills the API account). Default strips it so Claude Max OAuth is used. |
-| `NON_INTERACTIVE`         | `0`                | When `1`, skip auto-attach (used by tests)                                                       |
+| Variable                     | Default            | Flag                          | Notes                                                                                            |
+|------------------------------|--------------------|-------------------------------|--------------------------------------------------------------------------------------------------|
+| `COORDINATOR_CMD`            | `gemini`           | —                             | `gemini`, `claude`, or any custom CLI                                                            |
+| `COORDINATOR_MODEL`          | `gemini-2.5-flash` | —                             | Only consumed when `COORDINATOR_CMD=gemini`. Stable; `gemini-3-flash-preview` is broken on multi-tool sequences (server-side INVALID_ARGUMENT). |
+| `COORDINATOR_VERBOSE`        | `0`                | —                             | When `1` and using gemini: swaps `-p` for `-i` (`--prompt-interactive`) so tool calls are visible live in the pane. Agent stays alive — exit with `/quit`. claude is unaffected (its `-p` already streams). |
+| `COORDINATOR_USE_API_KEY`    | `0`                | —                             | When `1` and using claude: keeps `ANTHROPIC_API_KEY` in the agent's env (bills the API account). Default strips it so Claude Max OAuth is used. |
+| `NON_INTERACTIVE`            | `0`                | —                             | When `1`, skip auto-attach (used by tests)                                                       |
+| `WATCH`                      | `0`                | `-w`, `--watch`               | When `1`, spawn `coordinator-watch.sh` in window 2                                               |
+| `STATUS`                     | `0`                | `--status`                    | When `1`, spawn `gh-status-bar.sh` in window 3                                                   |
+| `MAX_WORKERS`                | `2`                | `--max-workers N`             | Concurrent worker tmux windows the coordinator may have alive at once. `provision-worker.sh` enforces server-side (exit 3 on cap). |
+| `MAX_TMUX_WINDOWS`           | `10`               | `--max-windows N`             | Hard cap on total tmux windows in the session — counts coordinator + watch + status + alive workers + leftover finished worker windows. |
+| `TARGET_AVAILABLE`           | `5`                | `--target-available N`        | Backlog target. Housekeeping creates new issues when AVAILABLE drops below this — NOT when raw open count is low. |
+| `OWNER_LABELS`               | empty              | `--owner-labels L1,L2`        | Comma-separated label names treated as "human-owned" (e.g. `sean,radesh`). The coordinator skips issues bearing any owner-label that isn't `@me`. |
+| `INCLUDE_ASSIGNED_TO_OTHERS` | `0`                | `--include-others`            | `1` = drop the `@me`-or-unassigned filter. Free-text override in the prompt (`"grab anything"`, `"include others"`) also engages this for one-shot use. |
+
+The cap/filter rows (last seven) are **also** loadable from `<project>/.swarm/.env` (durable per-project) and `<sandbox>/.env.example` (shipped defaults). Full precedence: flag > shell env > project file > sandbox defaults. See [README → Configuring caps and filters](../README.md#configuring-caps-and-filters) for the per-project setup recipe.
 
 #### Auto-discovery
 
@@ -155,6 +192,7 @@ Coordinator helper that creates a worktree, initializes the v2 queue, embeds `.s
 
 ```bash
 provision-worker.sh <issue-number> [project-dir]
+provision-worker.sh --help        # config, cap enforcement, events log
 ```
 
 #### Why this exists
@@ -254,6 +292,9 @@ Long-running daemon that watches every worker's `.swarm/tasks/done/` directory u
 # default — watches $PWD, debounces 30s, blocks on Ctrl-C
 coordinator-watch.sh
 
+# config, env vars, event categories
+coordinator-watch.sh --help
+
 # in another project
 coordinator-watch.sh /opt/work/myproject
 
@@ -279,12 +320,23 @@ ONCE=1 coordinator-watch.sh
 | `DRY_RUN` | `0` | Log triggers without invoking llm-start.sh |
 | `ONCE` | `0` | Exit after first wake — for smoke-tests |
 | `LLM_START` | `$LLM_SANDBOX_DIR/llm-start.sh` | Override path |
-| `WAKE_PROMPT` | (status-triage prompt; read-only) | What the coordinator does when woken |
+| `WAKE_PROMPT` | (top-up prompt — see below) | What the coordinator does when woken |
 | `POLL_SECS` | `2` | Polling interval (polling backend only) |
 | `POST_OUTCOMES` | `0` | Set to `1` to also run `sweep-swarm-outcomes.sh` on each detected outcome. Honors `$OUTCOME_HOOK`. Fires outside the wake-debounce window so every outcome gets audit coverage even when wakes are coalesced. |
 | `SWEEP` | `$LLM_SANDBOX_DIR/scripts/sweep-swarm-outcomes.sh` | Override sweep path |
 
-**Anti-runaway:** the default `WAKE_PROMPT` is read-only ("triage … decide next actions … do NOT dispatch new workers unless the user asked you to") and `DEBOUNCE_SECS` ensures back-to-back finishes don't N+1-loop the coordinator. Override `WAKE_PROMPT` if you want to hand more autonomy to the watcher.
+The watcher also reads `MAX_WORKERS` / `MAX_TMUX_WINDOWS` / `TARGET_AVAILABLE` / `OWNER_LABELS` / `INCLUDE_ASSIGNED_TO_OTHERS` from the same precedence chain (shell env > project `.swarm/.env` > sandbox `.env.example`). It uses them in two places: (a) the startup `watch.start` event line, and (b) implicitly via the wake prompt referencing the caps so the coordinator computes slots correctly.
+
+**Default wake prompt (top-up mode):** *"Triage outcome JSONs … then top up workers per the Initial Startup Checklist (compute AVAILABLE, count alive workers, fill open slots up to `MAX_WORKERS` subject to `MAX_TMUX_WINDOWS`). Use the @me-or-unassigned filter unless `INCLUDE_ASSIGNED_TO_OTHERS=1`."* This means the swarm self-replenishes without the user having to re-issue `llm-start.sh "provision more workers"` between worker generations.
+
+**Anti-runaway brakes** are layered:
+1. `provision-worker.sh` enforces `MAX_WORKERS` and `MAX_TMUX_WINDOWS` server-side (exit 3, refuses to spawn).
+2. `DEBOUNCE_SECS` (default 30s) coalesces back-to-back finishes into a single coordinator wake.
+3. The coordinator system prompt tells the LLM to compute `slots = min(MAX_WORKERS - alive, MAX_TMUX_WINDOWS - total_windows)` and stop when ≤ 0.
+
+To revert to the old conservative behavior ("triage only, don't dispatch"), set `WAKE_PROMPT` explicitly to your own text.
+
+**Events log:** the watcher and `provision-worker.sh` both append structured event lines to `<project>/.swarm/events.log` (`watch.start`, `worker.start`, `worker.finish`, `coord.wake`, `cap.refused`, etc.). `tail -F` it for live status.
 
 **Combined audit + wake (recommended for unattended runs):**
 

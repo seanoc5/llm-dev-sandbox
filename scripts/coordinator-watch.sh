@@ -43,23 +43,109 @@
 
 set -euo pipefail
 
+# --- Help / usage ---
+case "${1:-}" in
+    -h|--help)
+        cat <<EOF
+coordinator-watch.sh — Wake the coordinator on worker-finished events
+
+USAGE
+    coordinator-watch.sh [project-dir]
+
+ARGUMENTS
+    project-dir     Path to project root (default: \$PWD)
+
+DESCRIPTION
+    Long-running daemon. Watches every worker's .swarm/tasks/done/ dir
+    under the workspace (parent of project-dir). When a new outcome JSON
+    appears, wakes the coordinator via llm-start.sh so it can triage,
+    re-dispatch, and top up workers.
+
+CONFIG  (precedence: shell env > <project>/.swarm/.env > <sandbox>/.env.example)
+    DEBOUNCE_SECS       30        coalesce window for repeat events
+    POLL_SECS           2         poll-mode latency (when inotify absent)
+    DRY_RUN             0         log triggers, don't invoke llm-start.sh
+    ONCE                0         exit after first wake (smoke-test)
+    LLM_START           (auto)    override path to llm-start.sh
+    WAKE_PROMPT         (top-up)  what the coordinator does on wake
+    POST_OUTCOMES       0         run sweep-swarm-outcomes.sh per outcome
+    OUTCOME_HOOK        (none)    path to per-outcome poster
+    SWEEP               (auto)    override sweep-swarm-outcomes.sh path
+    WORKSPACE           (auto)    parent dir for wt-issue-* worktrees
+    MAX_WORKERS         2         (referenced by default WAKE_PROMPT)
+    MAX_TMUX_WINDOWS    10        (referenced by default WAKE_PROMPT)
+
+DEFAULT WAKE_PROMPT (top-up mode)
+    Coordinator triages outcomes, then refills workers toward MAX_WORKERS
+    (capped by MAX_TMUX_WINDOWS) using the @me-or-unassigned filter.
+    Set WAKE_PROMPT explicitly to revert to triage-only behavior.
+
+EVENTS LOG
+    Appends to <project>/.swarm/events.log:
+      watch.start    boot banner with backend + caps
+      worker.finish  outcome JSON detected (issue, ok|err)
+      coord.wake     llm-start.sh invoked (or coord.wake.skip on debounce)
+      sweep.run      sweep-swarm-outcomes.sh fired (when POST_OUTCOMES=1)
+      cap.refused    provision-worker.sh hit MAX_WORKERS / MAX_TMUX_WINDOWS
+
+BACKEND
+    Auto-detects inotifywait (instant) or falls back to polling find
+    (POLL_SECS latency). Install inotify-tools for instant wakes.
+
+EXAMPLES
+    coordinator-watch.sh                                # watch \$PWD
+    DRY_RUN=1 coordinator-watch.sh                      # log only, no wakes
+    POST_OUTCOMES=1 OUTCOME_HOOK=/path coordinator-watch.sh   # + auditing
+EOF
+        exit 0
+        ;;
+esac
+
 PROJECT_DIR="$(realpath "${1:-$PWD}")"
 # Worker worktrees are siblings of PROJECT_DIR (provision-worker.sh creates
 # them at <parent>/wt-issue-N), so the watch must scan the parent — not
 # PROJECT_DIR itself. Override with WORKSPACE=<dir> for non-standard layouts.
 WORKSPACE="$(realpath "${WORKSPACE:-$(dirname "$PROJECT_DIR")}")"
-DEBOUNCE_SECS="${DEBOUNCE_SECS:-30}"
-DRY_RUN="${DRY_RUN:-0}"
-ONCE="${ONCE:-0}"
 # Self-locate so defaults follow the script wherever it lives. LLM_START and
 # SWEEP env overrides still win for non-standard installs.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LLM_SANDBOX_DIR="${LLM_SANDBOX_DIR:-$(dirname "$SCRIPT_DIR")}"
+
+# Apply <project>/.swarm/.env then sandbox .env.example before reading
+# tunables, so caller env > project file > sandbox defaults. This script
+# is normally inheriting from the tmux session env (set up by llm-start.sh),
+# but the explicit load lets us run it standalone too.
+# shellcheck source=_load-env.sh
+. "$SCRIPT_DIR/_load-env.sh" "$PROJECT_DIR"
+
+DEBOUNCE_SECS="${DEBOUNCE_SECS:-30}"
+DRY_RUN="${DRY_RUN:-0}"
+ONCE="${ONCE:-0}"
 LLM_START="${LLM_START:-$LLM_SANDBOX_DIR/llm-start.sh}"
-WAKE_PROMPT="${WAKE_PROMPT:-Worker(s) just finished. Triage their outcome JSONs in worktrees/.swarm/tasks/done/ and decide next actions. Do NOT dispatch new workers unless the user asked you to.}"
+# Default wake prompt: top-up mode. The coordinator triages, then refills
+# alive worker count toward MAX_WORKERS (subject to MAX_TMUX_WINDOWS) using
+# the AVAILABLE filter defined in prompts/coordinator.md. To suppress
+# auto-provisioning (old conservative default), set WAKE_PROMPT explicitly
+# or invoke with INCLUDE_ASSIGNED_TO_OTHERS / triage-only language.
+WAKE_PROMPT="${WAKE_PROMPT:-Worker(s) just finished. Triage their outcome JSONs in worktrees/.swarm/tasks/done/, then top up workers per the Initial Startup Checklist (compute AVAILABLE, count alive workers, fill open slots up to MAX_WORKERS subject to MAX_TMUX_WINDOWS). Use the @me-or-unassigned filter unless INCLUDE_ASSIGNED_TO_OTHERS=1.}"
 POLL_SECS="${POLL_SECS:-2}"
 POST_OUTCOMES="${POST_OUTCOMES:-0}"
 SWEEP="${SWEEP:-$LLM_SANDBOX_DIR/scripts/sweep-swarm-outcomes.sh}"
+
+# Append-only structured event log. Every observable event (start, outcome,
+# wake, sweep, cap-refusal) gets a single line so `tail -F` gives live status.
+EVENTS_LOG="$PROJECT_DIR/.swarm/events.log"
+mkdir -p "$(dirname "$EVENTS_LOG")" 2>/dev/null || true
+
+# log_event <category> <key=val>...
+# Writes one line: "<utc-iso8601>  <category>  k=v k=v ..."
+# Failures are non-fatal — log writes never break watcher work.
+log_event() {
+    local cat="$1"; shift
+    local ts
+    ts="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+    printf '%s  %-15s %s\n' "$ts" "$cat" "$*" >> "$EVENTS_LOG" 2>/dev/null || true
+}
 
 # Validation
 [ -d "$PROJECT_DIR" ] || { echo "ERROR: not a directory: $PROJECT_DIR" >&2; exit 1; }
@@ -93,14 +179,26 @@ EOF
     echo "Press Ctrl-C to stop. Listening for create/moved_to events..."
 echo ""
 
+log_event watch.start \
+    "project=$PROJECT_DIR backend=$BACKEND debounce=${DEBOUNCE_SECS}s max_workers=${MAX_WORKERS:-?} max_tmux_windows=${MAX_TMUX_WINDOWS:-?}"
+
 # Shared state
 LAST_WAKE=0
 
 # Trigger logic — called when a NEW outcome JSON path is observed
 on_outcome() {
     local path="$1"
-    local now
+    local now issue outcome
     now=$(date +%s)
+
+    # Parse outcome filename: <task-id>-<issue>.<ok|err>.json
+    issue=$(basename "$path" | sed -E 's/.*-([0-9]+)\.(ok|err)\.json$/\1/')
+    case "$path" in
+        *.ok.json)  outcome=ok ;;
+        *.err.json) outcome=err ;;
+        *)          outcome=unknown ;;
+    esac
+    log_event worker.finish "issue=$issue outcome=$outcome path=$path"
 
     # Audit posting fires for EVERY outcome (not gated by wake-debounce).
     # The sweep is idempotent via .posted markers, so repeated calls are
@@ -109,19 +207,26 @@ on_outcome() {
     if [ "$POST_OUTCOMES" = "1" ]; then
         if [ "$DRY_RUN" = "1" ]; then
             echo "[$(date +%T)] [DRY] would: $SWEEP $PROJECT_DIR"
+            log_event sweep.dry "issue=$issue"
         else
             echo "[$(date +%T)] sweep: posting outcomes…"
-            "$SWEEP" "$PROJECT_DIR" || echo "[$(date +%T)] WARN: sweep returned non-zero (continuing watch)"
+            log_event sweep.run "issue=$issue"
+            "$SWEEP" "$PROJECT_DIR" || {
+                echo "[$(date +%T)] WARN: sweep returned non-zero (continuing watch)"
+                log_event sweep.error "issue=$issue"
+            }
         fi
     fi
 
     if [ $((now - LAST_WAKE)) -lt "$DEBOUNCE_SECS" ]; then
         echo "[$(date +%T)] outcome: $path — within debounce window (${DEBOUNCE_SECS}s), skipping wake"
+        log_event coord.wake.skip "issue=$issue reason=debounce window=${DEBOUNCE_SECS}s"
         return
     fi
 
     echo "[$(date +%T)] outcome: $path"
     echo "[$(date +%T)] waking coordinator..."
+    log_event coord.wake "issue=$issue trigger=$(basename "$path")"
 
     if [ "$DRY_RUN" = "1" ]; then
         echo "[DRY] would: cd $PROJECT_DIR && NON_INTERACTIVE=1 $LLM_START \"$WAKE_PROMPT\""
@@ -129,13 +234,16 @@ on_outcome() {
         # Run llm-start.sh in a subshell so its `set -e` doesn't kill us.
         # NON_INTERACTIVE=1 prevents auto-attach; coordinator runs detached
         # in its tmux session.
-        ( cd "$PROJECT_DIR" && NON_INTERACTIVE=1 "$LLM_START" "$WAKE_PROMPT" ) || \
+        ( cd "$PROJECT_DIR" && NON_INTERACTIVE=1 "$LLM_START" "$WAKE_PROMPT" ) || {
             echo "[$(date +%T)] WARN: coordinator wake exited non-zero (continuing watch)"
+            log_event coord.wake.error "issue=$issue"
+        }
     fi
     LAST_WAKE=$now
 
     if [ "$ONCE" = "1" ]; then
         echo "[$(date +%T)] ONCE=1 — exiting after first wake."
+        log_event watch.exit "reason=once"
         exit 0
     fi
 }
