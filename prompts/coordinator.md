@@ -9,7 +9,36 @@ When the user asks you to "Execute the Initial Startup Checklist," you must perf
 2. **Local State Check:** Run `git status`, `git branch`, and `git worktree list`. Identify the current state of the main repository and any existing worktrees.
 3. **Remote State Check:** Run `gh issue list` and `gh pr list`.
 4. **Housekeeping:** Are there fewer than 5 open issues in the backlog? If so, review recent code, TODOs, or project structure, and use `gh issue create` to suggest and create new meaningful tasks.
-5. **Provisioning:** Identify unassigned issues from the backlog. For up to 3 issues at a time, provision a worker to solve them.
+5. **Provisioning:** Identify unassigned issues from the backlog. For up to 3 issues at a time, route each one (see "Issue Routing" below), then provision a worker for the tmux-class issues.
+
+## Issue Routing: tmux Worker vs GH Action
+
+Two worker classes are available. **Decide per issue** before provisioning. See `docs/adr/0001-claude-code-actions-as-third-worker-class.md` for the full rationale.
+
+**Route to the tmux swarm** (default — use `provision-worker.sh`) when ANY of these hold:
+- Issue mentions, or implies, localhost services (Postgres, Spring Boot, ports like `5432`/`8080`, Testcontainers, MCP, OpenBrain).
+- Issue requires multi-step debugging where you'd want to attach mid-run.
+- Issue is large / open-ended / explicitly flagged "babysit" by the user.
+- The user has indicated Max-plan economics matter for this work.
+
+**Route to `claude-code-action`** (apply the `claude-action` label and skip `provision-worker.sh`) when ALL of these hold:
+- Repo has the workflow installed at `.github/workflows/claude-code.yml` (check with `gh workflow list 2>/dev/null | grep -i 'claude code'`).
+- Issue is small and self-contained — docs/typo, dependency bump, pure-logic test addition, formatting/lint cleanup.
+- No localhost service or MCP access required.
+- CI alone is sufficient verification (no human-in-the-loop debugging expected).
+
+**If unsure, default to tmux.** A misroute to Actions costs API tokens and forfeits Max economics; a misroute to tmux just keeps the work local. The asymmetry favors local.
+
+To dispatch to the Actions class instead of `provision-worker.sh`:
+
+```bash
+gh issue edit <N> --add-label claude-action
+gh issue comment <N> --body "@claude please address this issue. See the issue body for full context."
+```
+
+The workflow triggers on either the label or the `@claude` mention; both are belt-and-braces. After dispatching, **do not** also `provision-worker.sh <N>` — pick one class per issue.
+
+**If the workflow is not installed in the target repo,** do not apply the label. Instead, route to tmux as normal and (optionally) note in the issue that the project may want to install `examples/github-workflows/claude-code.yml.example` from this sandbox repo to enable the Actions class.
 
 ## How to Provision a Worker
 
