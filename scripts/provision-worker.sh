@@ -145,10 +145,54 @@ TMP="$(mktemp -p "$WT/.swarm/tasks/inbox" .tmp.XXXXXX.md)"
         echo "---"
         echo
     fi
-    echo "## Task"
-    echo
-    echo "Fix issue #$ISSUE. Details follow."
-    echo
+    cat <<EOF
+## Completion Protocol
+
+When the issue's acceptance criteria are met:
+
+1. Stage and commit your changes on the current branch (\`fix/issue-$ISSUE\`).
+   Group related changes into one logical commit; multiple commits are fine
+   if the work has natural boundaries.
+2. Push the branch: \`git push -u origin fix/issue-$ISSUE\`.
+3. Open a PR: \`gh pr create --title "..." --body "..."\`. Body MUST include
+   \`Fixes #$ISSUE\` so the issue auto-closes on merge.
+4. Stop there. Do NOT merge, do NOT close the issue, do NOT delete the branch
+   — those are the human reviewer's steps.
+
+## Blocker Escalation
+
+If you cannot finish autonomously — environment broken, ambiguous acceptance
+criteria, missing context the brief did not supply, design decision needed,
+the issue's premises don't match the code as it actually is, etc. — DO NOT
+invent answers, widen scope, or open a half-baked "TODO: figure out X" PR.
+
+Instead:
+
+1. Write \`.swarm/tasks/blocked/$TASK_ID.md\` with:
+   - **Top of file:** the specific question(s) or what you'd need to proceed.
+     Be concrete — "should the loader accept None or raise?" beats "what
+     should I do here?".
+   - **Below:** what you tried, what you discovered, the relevant file:line
+     references, and any partial work-in-progress findings.
+2. If you have committable partial work that's safe to keep (e.g. a passing
+   test that isolates the unclear case), commit it on a \`wip/issue-$ISSUE\`
+   branch and push. DO NOT open a PR for WIP.
+3. Exit (claude /quit or just stop). The listener will reload your full
+   conversation via \`claude --continue\` when a human is ready to resume —
+   you don't need to re-summarize context, just write the blocker file and
+   stop.
+
+The presence of \`.swarm/tasks/blocked/$TASK_ID.md\` is the signal that gets
+this worker surfaced in coordinator heartbeats as needing human attention.
+Without that file, a stuck worker looks identical to a successful one.
+
+---
+
+## Task
+
+Fix issue #$ISSUE. Details follow.
+
+EOF
     gh issue view "$ISSUE"
 } > "$TMP"
 # `mv -n` won't clobber even if a colliding file appeared between our

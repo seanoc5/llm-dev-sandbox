@@ -236,8 +236,18 @@ heartbeat_loop() {
                    "$WORKSPACE"/wt-issue-*/.swarm/tasks/done/*.err.json)
             echo "${#files[@]}"
         )
-        printf '[%s] heartbeat — backend=%s last_outcome=%s since_wake=%s tracked=%s\n' \
-            "$(date +%H:%M:%S)" "$BACKEND" "$since_outcome" "$since_wake" "$tracked"
+        # Blocked count: workers with a .swarm/tasks/blocked/<task_id>.md
+        # marker present (per ADR-0002). Workers go quiet either because
+        # they finished OR because they're stuck — the marker distinguishes
+        # the two. Surface 'blocked=N' so the user knows when human attention
+        # is needed vs. when an iss-* window is just idle-after-success.
+        blocked_count=$(
+            shopt -s nullglob
+            markers=("$WORKSPACE"/wt-issue-*/.swarm/tasks/blocked/*.md)
+            echo "${#markers[@]}"
+        )
+        printf '[%s] heartbeat — backend=%s last_outcome=%s since_wake=%s tracked=%s blocked=%s\n' \
+            "$(date +%H:%M:%S)" "$BACKEND" "$since_outcome" "$since_wake" "$tracked" "$blocked_count"
     done
 }
 
@@ -270,6 +280,18 @@ on_outcome() {
     LAST_OUTCOME_TS=$now
     LAST_OUTCOME_INFO="$(date +%H:%M:%S) (issue=$issue, $outcome)"
     update_hb_state
+}
+
+# on_blocked — called when a new .swarm/tasks/blocked/<task_id>.md marker
+# is observed (either backend). Logs the event; does NOT trigger a wake
+# because the human, not the coordinator, is the resolver. The blocked
+# count appears in the next heartbeat naturally.
+on_blocked() {
+    local path="$1"
+    local issue
+    issue=$(basename "$(dirname "$(dirname "$(dirname "$path")")")" | sed 's/^wt-issue-//')
+    log_event worker.blocked "issue=$issue path=$path"
+    echo "[$(date +%T)] worker.blocked — issue=$issue marker=$path"
 
     # Audit posting fires for EVERY outcome (not gated by wake-debounce).
     # The sweep is idempotent via .posted markers, so repeated calls are
@@ -340,6 +362,9 @@ run_inotify() {
             */wt-issue-*/.swarm/tasks/done/*.ok.json|*/wt-issue-*/.swarm/tasks/done/*.err.json)
                 on_outcome "$path"
                 ;;
+            */wt-issue-*/.swarm/tasks/blocked/*.md)
+                on_blocked "$path"
+                ;;
         esac
     done
 }
@@ -362,16 +387,22 @@ run_poll() {
     # may expand to nothing if no worker worktrees exist yet — handle that
     # gracefully via nullglob so the find call gets an empty arg list.
     scan_outcomes() {
-        local done_dirs=()
+        local done_dirs=() blocked_dirs=()
         shopt -s nullglob
         done_dirs=("$WORKSPACE"/wt-issue-*/.swarm/tasks/done)
+        blocked_dirs=("$WORKSPACE"/wt-issue-*/.swarm/tasks/blocked)
         shopt -u nullglob
-        if [ "${#done_dirs[@]}" -eq 0 ]; then
+        if [ "${#done_dirs[@]}" -eq 0 ] && [ "${#blocked_dirs[@]}" -eq 0 ]; then
             return 0   # no worker worktrees — emit empty
         fi
-        find "${done_dirs[@]}" -maxdepth 1 \
-            \( -name '*.ok.json' -o -name '*.err.json' \) -print 2>/dev/null \
-            | sort -u
+        # Outcome JSONs and blocked markers share the same poll set; the
+        # dispatcher below routes by suffix.
+        {
+            [ "${#done_dirs[@]}" -gt 0 ] && find "${done_dirs[@]}" -maxdepth 1 \
+                \( -name '*.ok.json' -o -name '*.err.json' \) -print 2>/dev/null
+            [ "${#blocked_dirs[@]}" -gt 0 ] && find "${blocked_dirs[@]}" -maxdepth 1 \
+                -name '*.md' -print 2>/dev/null
+        } | sort -u
     }
 
     scan_outcomes > "$seen_file"
@@ -387,7 +418,10 @@ run_poll() {
         if [ -n "$diff_new" ]; then
             while IFS= read -r path; do
                 [ -z "$path" ] && continue
-                on_outcome "$path"
+                case "$path" in
+                    */tasks/done/*.ok.json|*/tasks/done/*.err.json) on_outcome "$path" ;;
+                    */tasks/blocked/*.md)                          on_blocked "$path" ;;
+                esac
             done <<< "$diff_new"
             echo "$current" > "$seen_file"
         fi

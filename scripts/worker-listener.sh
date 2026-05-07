@@ -44,7 +44,11 @@ QUEUE_ROOT=".swarm/tasks"
 INBOX="$QUEUE_ROOT/inbox"
 PROCESSING="$QUEUE_ROOT/processing"
 DONE="$QUEUE_ROOT/done"
-mkdir -p "$INBOX" "$PROCESSING" "$DONE"
+# blocked/ is the third terminal state (alongside ok/err) — agent writes
+# .swarm/tasks/blocked/<task_id>.md to signal "stuck, needs human + context".
+# See ADR-0002.
+BLOCKED="$QUEUE_ROOT/blocked"
+mkdir -p "$INBOX" "$PROCESSING" "$DONE" "$BLOCKED"
 
 # Per-worktree label used in user-visible messages so it's obvious which
 # worktree's inbox this listener is bound to (and that it does NOT serve
@@ -123,8 +127,12 @@ claim_next_task() {
 }
 
 # Write a structured outcome record for v2 tasks. No-op for v1 (no contract).
+# `blocked_arg` (5th arg) is "true" if a .swarm/tasks/blocked/<task_id>.md
+# marker existed at outcome time — see ADR-0002. The `outcome` field stays
+# binary (ok|err) for backward compat; `blocked` is a separate flag so
+# pre-existing consumers that scan *.{ok,err}.json keep working.
 write_outcome() {
-    local rc="$1" started="$2" finished="$3" duration="$4"
+    local rc="$1" started="$2" finished="$3" duration="$4" blocked_arg="${5:-false}"
     [ "$IS_LEGACY" = "1" ] && return 0
 
     local outcome="ok"
@@ -143,6 +151,7 @@ write_outcome() {
   "duration_seconds": $duration,
   "exit_code": $rc,
   "outcome": "$outcome",
+  "blocked": $blocked_arg,
   "agent": "$AGENT",
   "model": $model_json,
   "headless": $([ "$HEADLESS" = "1" ] && echo true || echo false)
@@ -201,16 +210,55 @@ while true; do
         FINISHED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
         DURATION=$(( $(date +%s) - STARTED_EPOCH ))
 
+        # Blocker handling (ADR-0002). If the agent wrote a marker before
+        # exiting, surface it visibly. In headless mode, also auto-pivot
+        # into an interactive `claude --continue` so a human attaching
+        # later finds the full prior conversation reloaded — not a fresh
+        # shell with the context already gone. In interactive (default)
+        # mode, the agent's REPL has already happened, so we just leave
+        # the marker in place as an observability signal.
+        BLOCKED_MARKER=""
+        WAS_BLOCKED="false"
+        if [ "$IS_LEGACY" = "0" ]; then
+            BLOCKED_MARKER="$BLOCKED/$TASK_ID.md"
+            if [ -f "$BLOCKED_MARKER" ]; then
+                WAS_BLOCKED="true"
+                echo "════════════════════════════════════════════════════════"
+                echo "[$(date +%T)] BLOCKED — agent wrote $BLOCKED_MARKER"
+                echo "════════════════════════════════════════════════════════"
+                cat "$BLOCKED_MARKER"
+                echo "════════════════════════════════════════════════════════"
+                if [ "$HEADLESS" = "1" ] && [ "$AGENT" = "claude" ]; then
+                    echo "[$(date +%T)] Headless mode: auto-pivoting to \`claude --continue\`."
+                    echo "                   Attach to this window; /quit when done."
+                    echo "════════════════════════════════════════════════════════"
+                    # The pivot itself can fail (e.g., session not found if
+                    # claude state was wiped) — don't let that crash the
+                    # listener. Capture rc but use the original RC for the
+                    # outcome JSON; the outcome reflects the original task.
+                    claude "${MODEL_OPTS[@]}" --continue --dangerously-skip-permissions || true
+                    echo "════════════════════════════════════════════════════════"
+                    echo "[$(date +%T)] Pivot session ended; resuming listener loop."
+                    echo "════════════════════════════════════════════════════════"
+                fi
+            fi
+        fi
+
         # Move brief into the appropriate archive location, then write outcome.
         if [ "$IS_LEGACY" = "1" ]; then
             mv "$TASK_PATH" ".agent-task-last.md"
         else
             mv "$TASK_PATH" "$DONE/$(basename "$TASK_PATH")"
-            write_outcome "$RC" "$STARTED" "$FINISHED" "$DURATION"
+            write_outcome "$RC" "$STARTED" "$FINISHED" "$DURATION" "$WAS_BLOCKED"
         fi
 
         echo "------------------------------"
-        echo "[$(date +%T)] Task complete (exit $RC, ${DURATION}s). Waiting for next brief in $WT_LABEL/$INBOX/ — use 'requeue.sh ${WT_LABEL#wt-issue-} <brief>' to send a follow-up on this issue. (Different issues need their own worktree via provision-worker.sh.)"
+        if [ "$WAS_BLOCKED" = "true" ]; then
+            echo "[$(date +%T)] Task BLOCKED (exit $RC, ${DURATION}s). Marker: $BLOCKED_MARKER"
+            echo "                   Coordinator-watch surfaces this; resolve by attaching, removing the marker, and using requeue.sh ${WT_LABEL#wt-issue-} <follow-up brief>."
+        else
+            echo "[$(date +%T)] Task complete (exit $RC, ${DURATION}s). Waiting for next brief in $WT_LABEL/$INBOX/ — use 'requeue.sh ${WT_LABEL#wt-issue-} <brief>' to send a follow-up on this issue. (Different issues need their own worktree via provision-worker.sh.)"
+        fi
     fi
     sleep 2
 done
