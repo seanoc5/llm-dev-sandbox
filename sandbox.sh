@@ -56,6 +56,20 @@ if [ -d "$HOME/.gemini" ]; then
     MOUNTS+=(-v "$HOME/.gemini:/home/sandbox/.gemini:ro")
 fi
 
+# atuin — shell history backend. The claude-code hooks on the host
+# (~/.claude/settings.json) call `atuin hook claude-code` on every Bash
+# tool call; the binary itself ships in the image, but for the recorded
+# history to land in the same DB the host shell sees we mount the host's
+# data + config dirs. Atuin's sqlite DB runs in WAL mode, so concurrent
+# writes from host and container are safe. Both dirs are skipped silently
+# if absent so this works on machines without atuin too.
+if [ -d "$HOME/.config/atuin" ]; then
+    MOUNTS+=(-v "$HOME/.config/atuin:/home/sandbox/.config/atuin:ro")
+fi
+if [ -d "$HOME/.local/share/atuin" ]; then
+    MOUNTS+=(-v "$HOME/.local/share/atuin:/home/sandbox/.local/share/atuin:rw")
+fi
+
 # --- Git Worktree Support ---
 # Git worktrees use a .git file containing an absolute path pointing to the
 # main repository's .git directory. If this directory is outside PROJECT_DIR,

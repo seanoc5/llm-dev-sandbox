@@ -19,11 +19,18 @@ ARG DEBIAN_FRONTEND=noninteractive
 #   npm view promptfoo version
 #   curl -s https://api.github.com/repos/denoland/deno/releases/latest    | jq -r .tag_name
 #   curl -s https://api.github.com/repos/astral-sh/uv/releases/latest     | jq -r .tag_name
+#   curl -s https://api.github.com/repos/atuinsh/atuin/releases/latest    | jq -r .tag_name
 #
 # (Apt-managed tools — Java, ripgrep, gh, docker-cli — are intentionally NOT
 # pinned to dpkg version strings; the maintenance overhead outweighs the
 # benefit for a personal-dev sandbox. Major versions are still pinned via
 # package selection: openjdk-21, NodeSource setup_22.x.)
+#
+# atuin: keep the major version aligned with whatever host bashrc runs.
+# Atuin's sqlite history schema can change across majors, so when host
+# and container both write to a shared ~/.local/share/atuin/history.db
+# (mounted from sandbox.sh), version skew risks "no such column" errors.
+# Bumping the host? Bump ATUIN_VERSION and rebuild the image.
 ARG NODE_MAJOR=22
 ARG CLAUDE_CODE_VERSION=2.1.126
 ARG GEMINI_CLI_VERSION=0.40.1
@@ -31,6 +38,7 @@ ARG OPENAI_CODEX_VERSION=0.128.0
 ARG PROMPTFOO_VERSION=0.121.9
 ARG DENO_VERSION=2.7.14
 ARG UV_VERSION=0.11.8
+ARG ATUIN_VERSION=18.16.0
 
 # buildpack-deps:noble already provides:
 #   build-essential, curl, wget, git, ca-certificates, gnupg, and a large set of dev libs.
@@ -76,6 +84,17 @@ RUN curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/
     | tar -xz -C /usr/local/bin --strip-components=1 \
         uv-x86_64-unknown-linux-gnu/uv \
         uv-x86_64-unknown-linux-gnu/uvx
+
+# atuin — shell history backend. Required inside the sandbox so claude-code
+# hooks of the form `atuin hook claude-code` (configured on the host in
+# ~/.claude/settings.json) actually find the binary on PATH instead of
+# erroring with "atuin: not found" on every Bash tool call. The binary
+# alone is enough for the hooks; sandbox.sh additionally mounts the host's
+# ~/.config/atuin and ~/.local/share/atuin so container-side history lands
+# in the same DB the host shell sees.
+RUN curl -fsSL "https://github.com/atuinsh/atuin/releases/download/v${ATUIN_VERSION}/atuin-x86_64-unknown-linux-gnu.tar.gz" \
+    | tar -xz -C /usr/local/bin --strip-components=1 \
+        atuin-x86_64-unknown-linux-gnu/atuin
 
 # LLM CLIs & Tools — each npm package pinned to its exact version. Bump
 # the ARG above to upgrade. promptfoo and openai/codex are less impactful
@@ -138,7 +157,8 @@ RUN mkdir -p /home/sandbox/.npm /home/sandbox/.cache/pip /home/sandbox/.cache/uv
 
 # Add aliases for LLM CLIs
 RUN echo "alias claude='claude --dangerously-skip-permissions'" >> /home/sandbox/.bashrc \
-    && echo "alias gemini='gemini --yolo'" >> /home/sandbox/.bashrc
+    && echo "alias gemini='gemini --yolo'" >> /home/sandbox/.bashrc \
+    && echo 'command -v atuin >/dev/null 2>&1 && eval "$(atuin init bash)"' >> /home/sandbox/.bashrc
 
 USER sandbox
 WORKDIR /workspace
