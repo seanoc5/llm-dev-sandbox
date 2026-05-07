@@ -84,7 +84,7 @@ SANDBOX_SH="${SANDBOX_SH:-$LLM_SANDBOX_DIR/sandbox.sh}"
 # shellcheck source=_load-env.sh
 . "$SCRIPT_DIR/_load-env.sh" "$PROJECT_DIR"
 
-MAX_WORKERS="${MAX_WORKERS:-2}"
+MAX_WORKERS="${MAX_WORKERS:-5}"
 MAX_TMUX_WINDOWS="${MAX_TMUX_WINDOWS:-10}"
 
 # Append-only structured event log. Same format as coordinator-watch.sh.
