@@ -376,13 +376,41 @@ if ! $session_existed || $coordinator_idle; then
         ERR_TAIL=''
     fi
 
-    # Wrap BASE_CMD with pre-banner (project/model/prompt-summary) and
-    # post-footer (exit rc + duration) so the pane shows lifecycle status
-    # instead of going silent while claude reasons. Without these you can't
-    # tell "running" from "hung" or "exited cleanly". Script-time vars
-    # expand here; runtime $vars and $(...) are escaped to defer to the
-    # pane's shell.
-    LAUNCH_BANNER="echo \"=== coordinator launching @ \$(date '+%Y-%m-%d %H:%M:%S') ===\"; echo \"project: $PWD\"; echo \"model:   ${COORD_MODEL:-(default)}\"; echo \"prompt:  \$(head -1 '$TMP_PROMPT')\"; echo '---'"
+    # Wrap BASE_CMD with pre-banner (project/model/prompt + the major
+    # settings that govern this run) and post-footer (exit rc + duration)
+    # so the pane shows lifecycle status instead of going silent while
+    # claude reasons. Without these you can't tell "running" from "hung"
+    # from "exited cleanly". Script-time vars expand here; runtime $vars
+    # and $(...) are escaped to defer to the pane's shell.
+    _W_DISP=off;  [ "${WATCH:-0}"                      = 1 ] && _W_DISP=on
+    _I_DISP=off;  [ "${INTERACTIVE:-0}"                = 1 ] && _I_DISP=on
+    _O_DISP=off;  [ "${INCLUDE_ASSIGNED_TO_OTHERS:-0}" = 1 ] && _O_DISP=on
+    _OL_DISP="${OWNER_LABELS:-}"; [ -z "$_OL_DISP" ] && _OL_DISP="(none)"
+
+    LAUNCH_BANNER="\
+echo \"=== coordinator launching @ \$(date '+%Y-%m-%d %H:%M:%S') ===\"; \
+printf '%-15s %s\n' \
+    'project:'      '$PWD' \
+    'session:'      '$SESSION_NAME' \
+    'backend:'      '$COORD_CMD' \
+    'model:'        '${COORD_MODEL:-(default)}' \
+    'owner-labels:' '$_OL_DISP'; \
+echo; \
+echo '| setting          | value |'; \
+echo '|------------------|-------|'; \
+printf '| %-16s | %-5s |\n' \
+    watch            '$_W_DISP' \
+    interactive      '$_I_DISP' \
+    max-workers      '${MAX_WORKERS:-5}' \
+    max-windows      '${MAX_TMUX_WINDOWS:-10}' \
+    target-available '${TARGET_AVAILABLE:-5}' \
+    include-others   '$_O_DISP' \
+    debounce-secs    '${DEBOUNCE_SECS:-30}' \
+    poll-secs        '${POLL_SECS:-2}'; \
+echo; \
+echo \"prompt:         \$(head -1 '$TMP_PROMPT')\"; \
+echo '---'"
+    unset _W_DISP _I_DISP _O_DISP _OL_DISP
     LAUNCH_FOOTER="_rc=\$?; _t1=\$(date +%s); rm '$TMP_PROMPT'$ERR_TAIL; echo; echo \"=== coordinator exited rc=\$_rc @ \$(date +%H:%M:%S) (duration \$((_t1 - _t0))s) ===\""
 
     tmux send-keys -t "$SESSION_NAME:coordinator" \
