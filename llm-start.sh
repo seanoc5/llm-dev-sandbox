@@ -358,7 +358,17 @@ if ! $session_existed || $coordinator_idle; then
         ERR_TAIL=''
     fi
 
-    tmux send-keys -t "$SESSION_NAME:coordinator" "$BASE_CMD $PROMPT_FLAG \"\$(cat '$TMP_PROMPT')\"; rm '$TMP_PROMPT'$ERR_TAIL" C-m
+    # Wrap BASE_CMD with pre-banner (project/model/prompt-summary) and
+    # post-footer (exit rc + duration) so the pane shows lifecycle status
+    # instead of going silent while claude reasons. Without these you can't
+    # tell "running" from "hung" or "exited cleanly". Script-time vars
+    # expand here; runtime $vars and $(...) are escaped to defer to the
+    # pane's shell.
+    LAUNCH_BANNER="echo \"=== coordinator launching @ \$(date '+%Y-%m-%d %H:%M:%S') ===\"; echo \"project: $PWD\"; echo \"model:   ${COORD_MODEL:-(default)}\"; echo \"prompt:  \$(head -1 '$TMP_PROMPT')\"; echo '---'"
+    LAUNCH_FOOTER="_rc=\$?; _t1=\$(date +%s); rm '$TMP_PROMPT'$ERR_TAIL; echo; echo \"=== coordinator exited rc=\$_rc @ \$(date +%H:%M:%S) (duration \$((_t1 - _t0))s) ===\""
+
+    tmux send-keys -t "$SESSION_NAME:coordinator" \
+        "$LAUNCH_BANNER; _t0=\$(date +%s); $BASE_CMD $PROMPT_FLAG \"\$(cat '$TMP_PROMPT')\"; $LAUNCH_FOOTER" C-m
 fi
 
 # Optionally spawn coordinator-watch.sh in its own tmux window so the

@@ -64,6 +64,7 @@ DESCRIPTION
 CONFIG  (precedence: shell env > <project>/.swarm/.env > <sandbox>/.env.example)
     DEBOUNCE_SECS       30        coalesce window for repeat events
     POLL_SECS           2         poll-mode latency (when inotify absent)
+    HEARTBEAT_SECS      60        periodic "still alive" line; 0 = silent
     DRY_RUN             0         log triggers, don't invoke llm-start.sh
     ONCE                0         exit after first wake (smoke-test)
     LLM_START           (auto)    override path to llm-start.sh
@@ -129,6 +130,7 @@ LLM_START="${LLM_START:-$LLM_SANDBOX_DIR/llm-start.sh}"
 # or invoke with INCLUDE_ASSIGNED_TO_OTHERS / triage-only language.
 WAKE_PROMPT="${WAKE_PROMPT:-Worker(s) just finished. Triage their outcome JSONs in worktrees/.swarm/tasks/done/, then top up workers per the Initial Startup Checklist (compute AVAILABLE, count alive workers, fill open slots up to MAX_WORKERS subject to MAX_TMUX_WINDOWS). Use the @me-or-unassigned filter unless INCLUDE_ASSIGNED_TO_OTHERS=1.}"
 POLL_SECS="${POLL_SECS:-2}"
+HEARTBEAT_SECS="${HEARTBEAT_SECS:-60}"
 POST_OUTCOMES="${POST_OUTCOMES:-0}"
 SWEEP="${SWEEP:-$LLM_SANDBOX_DIR/scripts/sweep-swarm-outcomes.sh}"
 
@@ -169,8 +171,10 @@ workspace:     $WORKSPACE (scanning $WORKSPACE/wt-issue-*/.swarm/tasks/done/)
 backend:       $BACKEND$([ "$BACKEND" = "poll" ] && echo " (install inotify-tools for instant response)")
 debounce:      ${DEBOUNCE_SECS}s
 poll interval: ${POLL_SECS}s$([ "$BACKEND" = "inotify" ] && echo " (unused in inotify mode)")
+heartbeat:     ${HEARTBEAT_SECS}s$([ "$HEARTBEAT_SECS" = "0" ] && echo " (disabled)")
 llm-start.sh:  $LLM_START
 post-outcomes: $POST_OUTCOMES$([ "$POST_OUTCOMES" = "1" ] && echo " (sweep: $SWEEP, hook: ${OUTCOME_HOOK:-default dry-run stub})")
+events log:    $EVENTS_LOG  (tail -F for full history)
 dry-run:       $DRY_RUN
 once:          $ONCE
 
@@ -184,6 +188,69 @@ log_event watch.start \
 
 # Shared state
 LAST_WAKE=0
+LAST_OUTCOME_TS=0
+LAST_OUTCOME_INFO="never"
+
+# --- Heartbeat -------------------------------------------------------------
+# Periodic "still alive" line so the pane isn't silent between events.
+# State is shared with the backgrounded printer via a small file (the
+# inotify backend's main loop runs inside a subshell pipeline, so on_outcome
+# vars wouldn't otherwise be visible to a backgrounded child).
+HB_STATE_FILE=""
+HB_PID=""
+
+if [ "$HEARTBEAT_SECS" -gt 0 ]; then
+    HB_STATE_FILE=$(mktemp -t coord-watch-hb-XXXXXX)
+    printf '0|never|0\n' > "$HB_STATE_FILE"
+fi
+
+# update_hb_state — called from on_outcome after LAST_OUTCOME_* / LAST_WAKE
+# are updated; the printer reads the file each tick.
+update_hb_state() {
+    [ -n "$HB_STATE_FILE" ] || return 0
+    printf '%s|%s|%s\n' "$LAST_OUTCOME_TS" "$LAST_OUTCOME_INFO" "$LAST_WAKE" \
+        > "$HB_STATE_FILE" 2>/dev/null || true
+}
+
+# heartbeat_loop — backgrounded printer. Counts current outcome JSONs as
+# a "tracked" gauge so you can see workers landing results in real time.
+heartbeat_loop() {
+    local now ts info wake_ts since_outcome since_wake tracked
+    while sleep "$HEARTBEAT_SECS"; do
+        [ -f "$HB_STATE_FILE" ] || break
+        IFS='|' read -r ts info wake_ts < "$HB_STATE_FILE" || break
+        now=$(date +%s)
+        if [ "${ts:-0}" = "0" ]; then
+            since_outcome="never"
+        else
+            since_outcome="$info"
+        fi
+        if [ "${wake_ts:-0}" = "0" ]; then
+            since_wake="—"
+        else
+            since_wake="$((now - wake_ts))s ago"
+        fi
+        tracked=$(
+            shopt -s nullglob
+            files=("$WORKSPACE"/wt-issue-*/.swarm/tasks/done/*.ok.json \
+                   "$WORKSPACE"/wt-issue-*/.swarm/tasks/done/*.err.json)
+            echo "${#files[@]}"
+        )
+        printf '[%s] heartbeat — backend=%s last_outcome=%s since_wake=%s tracked=%s\n' \
+            "$(date +%H:%M:%S)" "$BACKEND" "$since_outcome" "$since_wake" "$tracked"
+    done
+}
+
+cleanup_hb() {
+    [ -n "$HB_PID" ] && kill "$HB_PID" 2>/dev/null || true
+    [ -n "$HB_STATE_FILE" ] && rm -f "$HB_STATE_FILE" || true
+}
+
+if [ "$HEARTBEAT_SECS" -gt 0 ]; then
+    heartbeat_loop &
+    HB_PID=$!
+fi
+trap cleanup_hb EXIT INT TERM
 
 # Trigger logic — called when a NEW outcome JSON path is observed
 on_outcome() {
@@ -199,6 +266,10 @@ on_outcome() {
         *)          outcome=unknown ;;
     esac
     log_event worker.finish "issue=$issue outcome=$outcome path=$path"
+
+    LAST_OUTCOME_TS=$now
+    LAST_OUTCOME_INFO="$(date +%H:%M:%S) (issue=$issue, $outcome)"
+    update_hb_state
 
     # Audit posting fires for EVERY outcome (not gated by wake-debounce).
     # The sweep is idempotent via .posted markers, so repeated calls are
@@ -240,6 +311,7 @@ on_outcome() {
         }
     fi
     LAST_WAKE=$now
+    update_hb_state
 
     if [ "$ONCE" = "1" ]; then
         echo "[$(date +%T)] ONCE=1 — exiting after first wake."
@@ -280,7 +352,11 @@ run_poll() {
     # for anything that existed before the watcher started.
     local seen_file
     seen_file=$(mktemp -t coord-watch-seen-XXXXXX)
-    trap 'rm -f "$seen_file"' EXIT INT TERM
+    # Merge with the global cleanup_hb trap; bare `trap CMD SIG` would
+    # replace it and leak the heartbeat subshell + state file on Ctrl-C.
+    # Guard $seen_file with :- because EXIT trap may fire after the
+    # function returns (local var out of scope), which would trip set -u.
+    trap '[ -n "${seen_file:-}" ] && rm -f "$seen_file"; cleanup_hb' EXIT INT TERM
 
     # Scan only wt-issue-*/.swarm/tasks/done dirs under WORKSPACE. The glob
     # may expand to nothing if no worker worktrees exist yet — handle that
