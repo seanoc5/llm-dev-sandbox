@@ -50,6 +50,9 @@ ARGUMENTS
 FLAGS
     -h, --help                       Show this help and exit
     -w, --watch                      Spawn coordinator-watch.sh   (= WATCH=1)
+    -i, --interactive                Keep coordinator open after first reply
+                                     so you can answer follow-up questions
+                                     in-pane                      (= INTERACTIVE=1)
     -y, --yolo                       Opinionated automation bundle (see below)
         --status                     Spawn gh-status-bar window   (= STATUS=1)
         --max-workers N              Concurrent worker tmux windows
@@ -70,7 +73,8 @@ ENV VARS  (precedence: flag > shell env > <project>/.swarm/.env > <sandbox>/.env
   Coordinator
     COORDINATOR_CMD              claude    claude | gemini
     COORDINATOR_MODEL            (varies)  per-coordinator default
-    COORDINATOR_VERBOSE          0         gemini -i instead of -p
+    INTERACTIVE                  0         stay open for follow-up Q&A (both backends)
+    COORDINATOR_VERBOSE          0         gemini -i instead of -p (legacy; INTERACTIVE supersedes)
     COORDINATOR_USE_API_KEY      0         keep ANTHROPIC_API_KEY (bills API)
 
   Caps & filters  [also loadable from <project>/.swarm/.env]
@@ -94,6 +98,7 @@ ENV VARS  (precedence: flag > shell env > <project>/.swarm/.env > <sandbox>/.env
 EXAMPLES
     ./llm-start.sh                              # one-shot triage, defaults
     ./llm-start.sh -w                           # one-shot + auto top-up
+    ./llm-start.sh -i                           # interactive: chat with coordinator
     ./llm-start.sh --yolo                       # unattended sprint mode
     ./llm-start.sh --max-workers 8 -w           # 8 workers, watcher on
     MAX_WORKERS=8 ./llm-start.sh --yolo         # 8 (env wins over yolo's 5)
@@ -123,6 +128,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)              usage; exit 0 ;;
         -w|--watch)             export WATCH=1; shift ;;
+        -i|--interactive)       export INTERACTIVE=1; shift ;;
         -y|--yolo)              YOLO=1; shift ;;
         --status)               export STATUS=1; shift ;;
         --include-others)       export INCLUDE_ASSIGNED_TO_OTHERS=1; shift ;;
@@ -334,12 +340,24 @@ if ! $session_existed || $coordinator_idle; then
     # and exit. claude's -p prints tool calls as it works (verbose by default);
     # gemini's -p prints only the final answer (silent during work).
     #
-    # COORDINATOR_VERBOSE=1 swaps gemini's -p for -i (--prompt-interactive)
-    # so you can attach to the pane and watch tool calls live. Trade-off: the
-    # gemini agent stays alive after the prompt completes — exit it manually
-    # with /quit or Ctrl-D when satisfied. claude is unaffected since its -p
-    # is already verbose.
-    if [ "$COORD_CMD" = "gemini" ] && [ "${COORDINATOR_VERBOSE:-1}" = "1" ]; then
+    # INTERACTIVE=1 (or -i / --interactive flag) keeps the coordinator open
+    # after the first response so the user can answer follow-up questions
+    # in-pane instead of the coordinator dying with "I'll wait for your
+    # decision…" and the user having no input channel.
+    # - gemini: -i (--prompt-interactive). Exit with /quit.
+    # - claude: drop -p entirely; claude defaults to interactive REPL with
+    #   the initial prompt as a positional arg. Exit with /quit or Ctrl-D.
+    #
+    # COORDINATOR_VERBOSE=1 (legacy, gemini-only) is preserved so existing
+    # callers don't regress; it's equivalent to INTERACTIVE=1 for gemini.
+    if [ "${INTERACTIVE:-0}" = "1" ]; then
+        case "$COORD_CMD" in
+            gemini) PROMPT_FLAG="-i" ;;
+            claude) PROMPT_FLAG="" ;;
+            *)      PROMPT_FLAG="-p" ;;
+        esac
+        echo "INTERACTIVE=1: coordinator stays open after the prompt; exit with /quit or Ctrl-D."
+    elif [ "$COORD_CMD" = "gemini" ] && [ "${COORDINATOR_VERBOSE:-1}" = "1" ]; then
         PROMPT_FLAG="-i"
         echo "COORDINATOR_VERBOSE=1: gemini will stay interactive after the prompt; exit with /quit."
     else
