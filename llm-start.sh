@@ -278,7 +278,7 @@ if ! $session_existed; then
     # caps and filters loaded from .env.example / .swarm/.env above.
     for _v in MAX_WORKERS MAX_TMUX_WINDOWS TARGET_AVAILABLE OWNER_LABELS \
               INCLUDE_ASSIGNED_TO_OTHERS DEBOUNCE_SECS POLL_SECS \
-              LLM_SANDBOX_DIR; do
+              INTERACTIVE LLM_SANDBOX_DIR; do
         _val="${!_v:-}"
         [ -n "$_val" ] && TMUX_ENV_OPTS+=(-e "$_v=$_val")
     done
