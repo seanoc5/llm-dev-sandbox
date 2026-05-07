@@ -280,18 +280,6 @@ on_outcome() {
     LAST_OUTCOME_TS=$now
     LAST_OUTCOME_INFO="$(date +%H:%M:%S) (issue=$issue, $outcome)"
     update_hb_state
-}
-
-# on_blocked — called when a new .swarm/tasks/blocked/<task_id>.md marker
-# is observed (either backend). Logs the event; does NOT trigger a wake
-# because the human, not the coordinator, is the resolver. The blocked
-# count appears in the next heartbeat naturally.
-on_blocked() {
-    local path="$1"
-    local issue
-    issue=$(basename "$(dirname "$(dirname "$(dirname "$path")")")" | sed 's/^wt-issue-//')
-    log_event worker.blocked "issue=$issue path=$path"
-    echo "[$(date +%T)] worker.blocked — issue=$issue marker=$path"
 
     # Audit posting fires for EVERY outcome (not gated by wake-debounce).
     # The sweep is idempotent via .posted markers, so repeated calls are
@@ -340,6 +328,20 @@ on_blocked() {
         log_event watch.exit "reason=once"
         exit 0
     fi
+}
+
+# on_blocked — called when a new .swarm/tasks/blocked/<task_id>.md marker
+# is observed (either backend). Logs the event; does NOT trigger a wake
+# because the human, not the coordinator, is the resolver. The blocked
+# count appears in the next heartbeat naturally.
+on_blocked() {
+    local path="$1"
+    local issue
+    # path: <workspace>/wt-issue-<N>/.swarm/tasks/blocked/<task_id>.md
+    # → 4 dirnames to reach wt-issue-<N>; basename then strips wt-issue- prefix
+    issue=$(basename "$(dirname "$(dirname "$(dirname "$(dirname "$path")")")")" | sed 's/^wt-issue-//')
+    log_event worker.blocked "issue=$issue path=$path"
+    echo "[$(date +%T)] worker.blocked — issue=$issue marker=$path"
 }
 
 # ---------------------------------------------------------------------------
