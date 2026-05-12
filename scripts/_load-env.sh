@@ -52,6 +52,24 @@ _apply_env_file() {
     return 0
 }
 
+# Expand ${FAND_DATA_ROOT} references inside EXTRA_MOUNTS after both env
+# files are applied, so the resolved FAND_DATA_ROOT (caller env > project
+# .swarm/.env > sandbox .env.example) feeds the bind-mount spec consumed
+# by sandbox.sh and provision-worker.sh. See fand-poc ADR-0008. The
+# allow-list form expands ONLY ${FAND_DATA_ROOT}; any other `$` in
+# EXTRA_MOUNTS is left literal, so we don't accidentally pull in
+# unrelated shell vars.
+_expand_extra_mounts() {
+    [ -n "${EXTRA_MOUNTS:-}" ] || return 0
+    [[ "$EXTRA_MOUNTS" == *'${FAND_DATA_ROOT}'* ]] || return 0
+    if ! command -v envsubst >/dev/null 2>&1; then
+        echo "warn: envsubst not found; EXTRA_MOUNTS contains \${FAND_DATA_ROOT} but cannot expand" >&2
+        return 0
+    fi
+    EXTRA_MOUNTS="$(FAND_DATA_ROOT="${FAND_DATA_ROOT:-}" envsubst '${FAND_DATA_ROOT}' <<< "$EXTRA_MOUNTS")"
+    export EXTRA_MOUNTS
+}
+
 _load_env_main() {
     local proj sandbox
     proj="${1:-$PWD}"
@@ -60,9 +78,10 @@ _load_env_main() {
 
     _apply_env_file "$proj/.swarm/.env"        # project override
     _apply_env_file "$sandbox/.env.example"    # ship defaults
+    _expand_extra_mounts                       # resolve ${FAND_DATA_ROOT} sentinel
 }
 
 _load_env_main "$@"
 
 # Cleanup helpers from caller scope so they don't leak.
-unset -f _apply_env_file _load_env_main
+unset -f _apply_env_file _expand_extra_mounts _load_env_main
