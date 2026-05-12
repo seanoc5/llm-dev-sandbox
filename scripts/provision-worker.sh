@@ -196,8 +196,12 @@ else
         exit 3
     fi
 
+    # Container name lets the tmux Ctrl-Z binding `docker exec` into this
+    # specific worker. Format must match the binding in ~/.tmux.conf:
+    #   swarm-<session>-iss-<issue>
+    container_name="swarm-${SESSION_NAME}-iss-${ISSUE}"
     tmux new-window -d -t "$SESSION_NAME" -n "iss-$ISSUE" \
-        "$SANDBOX_SH $WT listener"
+        "WORKER_CONTAINER_NAME=$container_name $SANDBOX_SH $WT listener"
     echo "[4/4] tmux window iss-$ISSUE spawned (listener)"
     log_event worker.start "issue=$ISSUE task_id=$TASK_ID window=iss-$ISSUE alive=$((alive_workers + 1))/$MAX_WORKERS total_windows=$((total_windows + 1))/$MAX_TMUX_WINDOWS"
 fi

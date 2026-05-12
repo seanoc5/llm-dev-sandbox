@@ -190,6 +190,14 @@ if [ -t 0 ]; then
     INTERACTIVE_FLAGS=("-it")
 fi
 
+# Optional deterministic container name. Set by provision-worker.sh so that
+# external tooling (e.g. the tmux Ctrl-Z binding for iss-* windows) can
+# `docker exec` into a known name. Unset for ad-hoc invocations.
+NAME_OPT=()
+if [ -n "${WORKER_CONTAINER_NAME:-}" ]; then
+    NAME_OPT=(--name "$WORKER_CONTAINER_NAME")
+fi
+
 # Get the directory of this script so we can find worker-listener.sh
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 
@@ -223,6 +231,7 @@ echo "Agent:    $AGENT"
 echo "---------------------------"
 
 exec docker run "${INTERACTIVE_FLAGS[@]}" --rm --init \
+    "${NAME_OPT[@]}" \
     --network host \
     --user "$(id -u):$(id -g)" \
     --workdir "$PROJECT_DIR" \
