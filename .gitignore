@@ -1,3 +1,7 @@
 .tools/
 *.bak
 .idea/
+
+# Swarm runtime state (events log, optional .env, task queues).
+# coordinator.md describes everything here as runtime artifacts.
+.swarm/
