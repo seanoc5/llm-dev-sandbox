@@ -13,6 +13,7 @@ This document covers advanced workflows, custom mounts, and manual Git worktree 
 - [Docker Integrations](#docker-integrations)
   - [Testcontainers / Docker CLI](#testcontainers--docker-cli)
   - [Rebuilding the Image](#rebuilding-the-image)
+- [Worker Escape Hatch (Ctrl-Z drops to shell)](#worker-escape-hatch-ctrl-z-drops-to-shell)
 - [Triage Workflow](#triage-workflow)
   - [The triage cycle](#the-triage-cycle)
   - [Read-only triage prompt](#read-only-triage-prompt)
@@ -120,6 +121,65 @@ docker build -t llm-sandbox:latest .
 # Force a full rebuild (no cache)
 docker build --no-cache -t llm-sandbox:latest .
 ```
+
+## Worker Escape Hatch (Ctrl-Z drops to shell)
+
+Sometimes you want a plain shell **inside the same container** as a running worker — to inspect the worktree, run a quick `git log`, check `gh pr view`, poke at `node_modules/`, or drop a manual brief into `.swarm/tasks/inbox/`. You don't want to suspend claude (no useful way to resume it from inside a `docker run` foreground), and you don't want to spin up a separate container that wouldn't share the worktree state.
+
+The tmux Ctrl-Z escape hatch handles this: in any `iss-*` window, **Ctrl-Z splits a sibling pane that `docker exec`s into the same worker container as a login shell**. The original pane keeps running claude untouched. The new pane sees the same worktree mount, same git state, same gh auth, same env.
+
+### How it works
+
+Three pieces have to line up:
+
+| Piece | Where |
+|---|---|
+| Container is started with a deterministic `--name` | `sandbox.sh` (worker mode) |
+| `provision-worker.sh` uses the format `swarm-<session>-<window>` | `scripts/provision-worker.sh` |
+| Tmux intercepts Ctrl-Z in `iss-*` windows and `docker exec`s into that name | `~/.tmux.conf` (you install this) |
+
+The binding (copy this block into `~/.tmux.conf` — also included in [`examples/tmux.conf.example`](../examples/tmux.conf.example)):
+
+```tmux
+# Worker (iss-*) Ctrl-Z escape hatch.
+# In any iss-* window, Ctrl-Z splits a sibling pane that docker-execs
+# into the same worker container as a login shell. claude keeps running.
+# In any other window, Ctrl-Z falls through to normal behavior.
+bind-key -n C-z if-shell -F '#{m:iss-*,#{window_name}}' \
+    'split-window -h "docker exec -it swarm-#{session_name}-#{window_name} bash -l"' \
+    'send-keys C-z'
+```
+
+After editing the config, reload it into the running tmux server (no restart required):
+
+```bash
+tmux source-file ~/.tmux.conf
+tmux list-keys -T root | grep C-z      # expect a binding here — if empty, the source-file didn't take
+```
+
+### Using it
+
+1. Attach to a swarm session and select an `iss-N` window.
+2. Press **Ctrl-Z**. A new pane splits to the right with a `bash -l` prompt inside the same container.
+3. Do whatever — `git log`, `ls .swarm/tasks/`, `gh pr view`, etc.
+4. When done, `exit` to close the helper pane. Claude in the original pane is unaffected.
+
+### Gotcha: config edited but not loaded
+
+If you edit `~/.tmux.conf` while a tmux server is already running, **the binding does not take effect until you source the file**. Symptom: Ctrl-Z in an `iss-*` window suspends claude inside the container and prints "Claude Code has been suspended. Run `fg` to bring Claude Code back" — but since the foreground process in that window is `docker run`, there's no host-side shell to type `fg` into.
+
+Recovery:
+
+```bash
+# Resume the suspended claude process directly inside the container
+docker exec swarm-<session>-iss-N bash -c 'pkill -CONT -f claude'
+
+# Then load the binding so this doesn't happen again
+tmux source-file ~/.tmux.conf
+tmux list-keys -T root | grep C-z
+```
+
+See also: [Troubleshooting → Ctrl-Z accidentally suspended claude](./troubleshooting.md#ctrl-z-accidentally-suspended-claude-inside-a-worker).
 
 ## Triage Workflow
 

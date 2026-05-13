@@ -29,6 +29,7 @@ Common issues and their resolutions. If you hit something not covered here, plea
   - [Coordinator pane shows old/stale output](#coordinator-pane-shows-oldstale-output)
   - [Worker isn't picking up briefs](#worker-isnt-picking-up-briefs)
   - [Tasks stuck in `processing/`](#tasks-stuck-in-processing)
+  - [Ctrl-Z accidentally suspended claude inside a worker](#ctrl-z-accidentally-suspended-claude-inside-a-worker)
   - [Gemini `run_shell_command` rejects `$(...)`](#gemini-run_shell_command-rejects-)
   - [Ripgrep fallback warning from gemini](#ripgrep-fallback-warning-from-gemini)
 - [Host Sysadmin Issues](#host-sysadmin-issues)
@@ -231,6 +232,42 @@ mv <wt>/.swarm/tasks/processing/<id>.md <wt>/.swarm/tasks/inbox/
 ```
 
 Or just write a fresh brief via `requeue.sh` — old briefs in `processing/` are not auto-retried.
+
+### Ctrl-Z accidentally suspended claude inside a worker
+
+Symptom: in an `iss-*` window you see something like:
+
+```
+Claude Code has been suspended. Run `fg` to bring Claude Code back.
+Note: ctrl + z now suspends Claude Code, ctrl + _ undoes input.
+```
+
+…and `fg` does nothing useful. This means the tmux Ctrl-Z escape hatch binding (see [Advanced Usage → Worker Escape Hatch](./advanced-usage.md#worker-escape-hatch-ctrl-z-drops-to-shell)) is **not loaded in the running tmux server** — Ctrl-Z passed straight through to claude in the container, which SIGSTOPped itself. Since the foreground process in the window is `docker run` (not a host shell), there's no job-control parent to type `fg` into.
+
+Verify the binding is missing:
+
+```bash
+tmux list-keys -T root | grep C-z      # empty → binding not loaded
+```
+
+Recover the suspended claude:
+
+```bash
+docker exec swarm-<session>-iss-N bash -c 'pkill -CONT -f claude'
+# example: docker exec swarm-llm-fand-poc-iss-162 bash -c 'pkill -CONT -f claude'
+```
+
+Then install / reload the binding so this doesn't recur:
+
+```bash
+# If the binding isn't in your config yet, copy the block from
+# examples/tmux.conf.example or see advanced-usage.md.
+
+tmux source-file ~/.tmux.conf
+tmux list-keys -T root | grep C-z      # should now show a binding
+```
+
+Common reason this happens: the binding was added to `~/.tmux.conf` *after* the current tmux server was started. tmux does not auto-reload config; `source-file` (or `Prefix-r` if you have the reload binding from the example config) picks up new bindings without restarting the server.
 
 ### Gemini `run_shell_command` rejects `$(...)`
 

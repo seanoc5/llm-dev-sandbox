@@ -148,10 +148,11 @@ Useful for the laptop+desk scenario where you don't want size-fighting AND don't
 | Forgot to detach before closing terminal — session still running?               | `tmux ls` (it survived; just `tmux attach`)                                                                        |
 | Need to nuke EVERYTHING and start over                                          | `tmux kill-session -t llm-<project>` (or `tmux kill-server` for all sessions on the host)                          |
 | Want a separate "control" terminal that drives the coordinator from outside    | `tmux send-keys -t llm-<project>:coordinator "<your prompt>" Enter`                                                |
+| Need a shell inside a worker container without disturbing claude               | `Ctrl-z` in any `iss-*` window — splits a sibling pane that `docker exec`s into the same container ([details](./advanced-usage.md#worker-escape-hatch-ctrl-z-drops-to-shell)) |
 
 ## Customizing tmux for this workflow
 
-A starter config tuned for the swarm — bigger scrollback (50000 lines, so `capture-pane -S -50000` actually has history to capture), 1-indexed windows, mouse mode, vi-style copy bindings, and a Ctrl-a prefix rebind — lives at [`examples/tmux.conf.example`](../examples/tmux.conf.example). Each block is independent; copy what you want:
+A starter config tuned for the swarm — bigger scrollback (50000 lines, so `capture-pane -S -50000` actually has history to capture), 1-indexed windows, mouse mode, vi-style copy bindings, a Ctrl-a prefix rebind, and the [Ctrl-Z worker escape hatch](./advanced-usage.md#worker-escape-hatch-ctrl-z-drops-to-shell) — lives at [`examples/tmux.conf.example`](../examples/tmux.conf.example). Each block is independent; copy what you want:
 
 ```bash
 cp examples/tmux.conf.example ~/.tmux.conf

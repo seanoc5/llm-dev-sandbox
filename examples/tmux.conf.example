@@ -81,3 +81,22 @@ bind r source-file ~/.tmux.conf \; display-message "~/.tmux.conf reloaded"
 # your timestamp display in non-swarm sessions, the gh-status-bar script
 # only modifies its own session — your other sessions stay as configured
 # above.
+
+# === Worker (iss-*) Ctrl-Z escape hatch ====================================
+# In a worker window the foreground process is `docker run` and there is
+# no host-side shell wrapping it — so a stray Ctrl-Z sends SIGTSTP straight
+# to claude inside the container, suspending it with no easy way to `fg`.
+#
+# Intercept Ctrl-Z in iss-* windows: split a sibling pane that `docker
+# exec`s into the SAME worker container as a login shell. claude keeps
+# running in the original pane; you get a bash with the worktree, branch,
+# and gh auth already in place. In any non-iss window, Ctrl-Z falls
+# through to its normal behavior.
+#
+# Requires that provision-worker.sh names containers `swarm-<session>-<window>`
+# (the default since v2). After adding this, run:
+#   tmux source-file ~/.tmux.conf
+#   tmux list-keys -T root | grep C-z      # verify it's now bound
+bind-key -n C-z if-shell -F '#{m:iss-*,#{window_name}}' \
+    'split-window -h "docker exec -it swarm-#{session_name}-#{window_name} bash -l"' \
+    'send-keys C-z'
