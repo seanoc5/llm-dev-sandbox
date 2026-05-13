@@ -57,11 +57,6 @@ Every file in `prompts/` should open with one sentence: "this doc is read
 by [WHO] who needs to [DO WHAT]." Forces the author to be honest about
 scope; gives the refactor/trim/focus skill a fixed yardstick.
 
-### Surface this roadmap to the coordinator
-Add a line to the coordinator's startup checklist that reads
-`docs/worker-guidance-roadmap.md` and notes whether any open ideas are
-worth converting into actual issues for the swarm.
-
 ---
 
 ## Done
@@ -69,7 +64,7 @@ worth converting into actual issues for the swarm.
 > Move entries here as they're addressed. Format:
 > `- (YYYY-MM-DD) <headline> — <commit-or-PR-ref>`
 
-*(none yet)*
+- (2026-05-13) **Surface this roadmap to the coordinator** — added step 2 to `prompts/coordinator.md` startup checklist (counts "Open ideas" entries each wake-up, surfaces to user, does NOT auto-file as issues).
 
 ---
 
