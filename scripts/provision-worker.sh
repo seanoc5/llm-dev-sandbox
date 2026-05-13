@@ -25,18 +25,29 @@ case "${1:-}" in
 provision-worker.sh — Provision a worker for one GitHub issue
 
 USAGE
-    provision-worker.sh <issue-number> [project-dir]
+    provision-worker.sh [-v|--verbosity LEVEL] <issue-number> [project-dir]
 
 ARGUMENTS
     issue-number    GitHub issue number to dispatch (required)
     project-dir     Path to project root (default: \$PWD)
 
+OPTIONS
+    -v, --verbosity LEVEL
+        Worker communication verbosity. One of: verbose, normal, concise,
+        spartan. See prompts/worker-base.md for what each level means.
+        Default precedence (highest wins):
+          1. this flag
+          2. WORKER_VERBOSITY in <project>/.swarm/.env
+          3. WORKER_VERBOSITY in <sandbox>/.env.example
+          4. 'verbose' (baseline default)
+
 DESCRIPTION
     One-call helper for the coordinator. Creates worktree at
     <parent>/wt-issue-N on branch fix/issue-N (idempotent), initializes
-    the v2 queue, embeds .swarm-policy.md guardrails into the brief,
-    atomic-writes the task into inbox/, and spawns a worker tmux window
-    'iss-N' running the sandbox listener.
+    the v2 queue, embeds the worker-base communication conventions plus
+    any project .swarm-policy.md guardrails into the brief, atomic-writes
+    the task into inbox/, and spawns a worker tmux window 'iss-N' running
+    the sandbox listener.
 
 CAP ENFORCEMENT (exit 3 on either)
     MAX_WORKERS         alive iss-* windows < cap         (default 2)
@@ -48,6 +59,7 @@ CAP ENFORCEMENT (exit 3 on either)
 CONFIG  (precedence: shell env > <project>/.swarm/.env > <sandbox>/.env.example)
     MAX_WORKERS         2         worker tmux window cap
     MAX_TMUX_WINDOWS    10        total session window cap
+    WORKER_VERBOSITY    verbose   worker communication level
     SANDBOX_SH          (auto)    path to sandbox.sh used by the listener
     LLM_SANDBOX_DIR     (auto)    sandbox install dir
 
@@ -58,14 +70,33 @@ EVENTS LOG
       cap.refused      MAX_WORKERS or MAX_TMUX_WINDOWS would be exceeded
 
 EXAMPLES
-    provision-worker.sh 142                 # dispatch issue #142 from \$PWD
-    provision-worker.sh 142 /path/to/proj   # explicit project dir
+    provision-worker.sh 142                          # dispatch issue #142 from \$PWD
+    provision-worker.sh 142 /path/to/proj            # explicit project dir
+    provision-worker.sh -v concise 142               # quiet worker
+    provision-worker.sh --verbosity spartan 142      # quietest worker
 EOF
         exit 0
         ;;
 esac
 
-ISSUE="${1:?usage: provision-worker.sh <issue-number> [project-dir]   (try --help)}"
+# --- Optional -v|--verbosity flag (must come before the issue number) ---
+VERBOSITY_OVERRIDE=""
+while [[ "${1:-}" == -* ]]; do
+    case "$1" in
+        -v|--verbosity)
+            VERBOSITY_OVERRIDE="${2:?--verbosity requires a value: verbose|normal|concise|spartan}"
+            case "$VERBOSITY_OVERRIDE" in
+                verbose|normal|concise|spartan) ;;
+                *) echo "ERROR: --verbosity must be one of: verbose, normal, concise, spartan (got '$VERBOSITY_OVERRIDE')" >&2; exit 2 ;;
+            esac
+            shift 2
+            ;;
+        --) shift; break ;;
+        *) echo "ERROR: unknown flag '$1' (try --help)" >&2; exit 2 ;;
+    esac
+done
+
+ISSUE="${1:?usage: provision-worker.sh [-v LEVEL] <issue-number> [project-dir]   (try --help)}"
 PROJECT_DIR="${2:-$PWD}"
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 WT="$(dirname "$PROJECT_DIR")/wt-issue-$ISSUE"
@@ -86,6 +117,17 @@ SANDBOX_SH="${SANDBOX_SH:-$LLM_SANDBOX_DIR/sandbox.sh}"
 
 MAX_WORKERS="${MAX_WORKERS:-2}"
 MAX_TMUX_WINDOWS="${MAX_TMUX_WINDOWS:-10}"
+
+# Resolve verbosity: --verbosity flag > shell/_load-env WORKER_VERBOSITY > 'verbose'.
+# Exported below into the worker container so the worker reads it from env;
+# also injected into the brief as a `## Worker verbosity` directive so a
+# worker that misses the env var still sees it in its task.
+WORKER_VERBOSITY="${VERBOSITY_OVERRIDE:-${WORKER_VERBOSITY:-verbose}}"
+export WORKER_VERBOSITY
+
+# Path to the always-injected worker baseline (communication conventions).
+# Lives in the sandbox repo; copied verbatim to the top of every worker brief.
+WORKER_BASE_MD="$LLM_SANDBOX_DIR/prompts/worker-base.md"
 
 # Append-only structured event log. Same format as coordinator-watch.sh.
 EVENTS_LOG="$PROJECT_DIR/.swarm/events.log"
@@ -137,6 +179,24 @@ done
 
 TMP="$(mktemp -p "$WT/.swarm/tasks/inbox" .tmp.XXXXXX.md)"
 {
+    # 1. Worker baseline communication conventions (sandbox-wide; non-overridable
+    #    constraints like "always emit a summary, NBA hint, and PR risk rating").
+    if [ -f "$WORKER_BASE_MD" ]; then
+        cat "$WORKER_BASE_MD"
+        echo
+        echo "---"
+        echo
+    fi
+    # 2. Active verbosity directive — explicit so a worker without the env var
+    #    still picks it up from prose.
+    echo "## Worker verbosity"
+    echo
+    echo "Active level: \`$WORKER_VERBOSITY\`"
+    echo
+    echo "---"
+    echo
+    # 3. Project-specific guardrails (per-project policy may extend or
+    #    override the worker baseline above).
     if [ -f .swarm-policy.md ]; then
         echo "## Project Guardrails (MUST OBEY)"
         echo
@@ -145,6 +205,7 @@ TMP="$(mktemp -p "$WT/.swarm/tasks/inbox" .tmp.XXXXXX.md)"
         echo "---"
         echo
     fi
+    # 4. The actual task.
     echo "## Task"
     echo
     echo "Fix issue #$ISSUE. Details follow."
@@ -201,7 +262,7 @@ else
     #   swarm-<session>-iss-<issue>
     container_name="swarm-${SESSION_NAME}-iss-${ISSUE}"
     tmux new-window -d -t "$SESSION_NAME" -n "iss-$ISSUE" \
-        "WORKER_CONTAINER_NAME=$container_name $SANDBOX_SH $WT listener"
+        "WORKER_CONTAINER_NAME=$container_name WORKER_VERBOSITY=$WORKER_VERBOSITY $SANDBOX_SH $WT listener"
     echo "[4/4] tmux window iss-$ISSUE spawned (listener)"
     log_event worker.start "issue=$ISSUE task_id=$TASK_ID window=iss-$ISSUE alive=$((alive_workers + 1))/$MAX_WORKERS total_windows=$((total_windows + 1))/$MAX_TMUX_WINDOWS"
 fi
