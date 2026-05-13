@@ -140,7 +140,7 @@ fi
 # Docker to pull the value from this caller's environment if set, otherwise
 # omit — so we never embed values in argv.
 WORKER_ENV_OPTS=()
-for _v in WORKER_HEADLESS WORKER_CMD WORKER_MODEL; do
+for _v in WORKER_HEADLESS WORKER_CMD WORKER_MODEL WORKER_VERBOSITY; do
     if [ -n "${!_v:-}" ]; then
         WORKER_ENV_OPTS+=(-e "$_v")
     fi

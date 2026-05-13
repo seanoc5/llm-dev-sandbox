@@ -3,14 +3,21 @@
 # Copy this to the ROOT of a project as `.swarm-policy.md` to give the
 # llm-dev-sandbox coordinator a per-project rules-of-engagement file.
 # The coordinator reads it on every wake (Initial Startup Checklist step 1)
-# and embeds it verbatim into every worker's `.agent-task.md` brief under
-# a "## Project Guardrails (MUST OBEY)" header.
+# and embeds it verbatim into every worker brief under a
+# "## Project Guardrails (MUST OBEY)" header.
 #
 # Format: free-form markdown. The coordinator does not parse it; it just
 # pastes the whole file into the worker brief. Be explicit and concrete.
 # The worker (claude / gemini) reads it as part of its task and will refuse
 # to violate clearly-stated rules in --yolo / --dangerously-skip-permissions
 # mode (which otherwise has no other constraint).
+#
+# A baseline set of communication conventions (PR risk rating, end-of-work
+# summary, decision-point framing, next-best-action hint, verbosity dial,
+# "surface don't bury" notes) is ALREADY injected before this file via
+# `prompts/worker-base.md`. You don't need to repeat them; only override
+# in the "Communication overrides" section below if your project needs
+# something different.
 
 ---
 
@@ -39,3 +46,16 @@
 - If you (the worker) hit a real ambiguity that needs human input, **stop and ask in the pane**. Do not guess. Do not silently change scope.
 - If the task is impossible as specified, write a short summary of why into `.agent-task-failed.md` and exit. Do not push a half-baked PR.
 - Do not write any comments containing your model identifier or self-attribution unless explicitly asked.
+
+## Communication overrides (optional)
+This section overrides or extends the baseline conventions in
+`prompts/worker-base.md` (which is injected above this file in every
+worker brief). Use it for project-specific tuning. Examples of what could
+go here:
+
+- "Override default verbosity to `concise` for all workers in this repo."
+- "PR risk rating must include a separate `<!-- LIQUIBASE_TOUCHED: yes|no -->` HTML comment when database migrations are present."
+- "End-of-work summary must include a `## Coverage delta` section listing tests added/changed."
+- "Next-best-action hints should always link to the project's runbook (`docs/RUNBOOK.md`) when CI fails."
+
+Leave empty if the baseline is fine for this project.

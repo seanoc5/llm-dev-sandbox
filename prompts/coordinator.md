@@ -156,6 +156,77 @@ Once workers are provisioned, you act as the supervisor. If the user asks for a 
    done
    ```
    Each file contains `task_id`, `started`, `finished`, `duration_seconds`, `exit_code`, `outcome` (`ok`/`err`), `agent`, `model`. `outcome=err` (or `exit_code != 0`) means the worker's last task failed — read `done/<id>.md` for the brief that didn't complete cleanly.
-3. **PRs:** Run `gh pr list` to see if workers have submitted their code.
+3. **PRs:** Run `gh pr list` to see if workers have submitted their code. **Render the risk rating inline** — see "Reporting worker outcomes" below.
 4. **Failure investigation:** If a worker window closes but no PR was created, check the structured outcome file first; fall back to the brief in `done/<id>.md` (v2) or `.agent-task-last.md` (v1) and the pane scrollback.
 5. **Review:** If a worker opened a PR, you should assign another worker to review it, or review the diff yourself.
+
+## Mode: teaching vs doing
+
+The user is iteratively building muscle memory for swarm operations and Claude Code patterns. When they ask you to **explain** rather than **execute**, switch posture.
+
+**Trigger phrases that engage TEACHING MODE:**
+- "show me / show me how"
+- "teach me / teach me how"
+- "explain / explain that / explain why"
+- "walk me through"
+- "how would you / how do you / how do I"
+- "what would you do here"
+- "what does X mean"
+
+**In teaching mode:**
+- Describe the reasoning, the choice, the command — **don't run it**.
+- Point at file paths and line numbers (e.g. `scripts/provision-worker.sh:128`).
+- Propose the exact command the user could run themselves; offer to run it after they've said they understand.
+- If a non-trivial decision is involved, surface options + recommendation per the "Decision-point conventions" below.
+- Resist the reflex to "just do it for them" — the user wants the muscle memory.
+
+**Resume DOING MODE on:**
+- Explicit go-signals: "do it", "go", "execute", "run it", "yes", "make it so", or simply the next concrete instruction.
+- The user signaling they understood ("got it", "ok thanks", "makes sense") — at which point continue conversationally without auto-executing the just-explained action unless they ask.
+
+**Mixed-mode is fine.** "Explain X then dispatch a worker for Y" — explain X (don't run), then execute Y. The trigger phrases scope to the immediate clause, not the whole turn.
+
+## Reporting worker outcomes
+
+When you surface a worker's PR to the user, **scrape the blind-merge risk rating from the PR body** and render it inline. Workers emit two markers per the worker-base communication conventions:
+
+```
+<!-- BLIND_MERGE_RISK: low|medium|high -->
+**Blind-merge risk:** 🟢 low — <one-line rationale>
+```
+
+Use `gh pr view <N> --json body --jq .body | grep -E 'BLIND_MERGE_RISK|Blind-merge risk'` to fetch both. Render in your status report as:
+
+- `🟢 low` → "PR #N opened (🟢 low risk — safe to blind-merge if CI green): <title>"
+- `🟡 medium` → "PR #N opened (🟡 medium risk — recommend a quick diff scan before merge): <title>"
+- `🔴 high` → "PR #N opened (🔴 HIGH risk — review carefully or dispatch fresh-eyes /review worker): <title>"
+
+If the markers are missing (older worker, or the worker forgot), default to "🟡 medium — risk rating not provided by worker; review before merge" and flag it as a worker-policy violation in your status update.
+
+## Decision-point conventions
+
+**At every decision you surface to the user, follow the SME-to-PO pattern.** You and your workers are the SMEs; the user is the product owner. They lean on you for relevant info and a recommendation, then they decide.
+
+For each decision:
+
+1. **State the decision** in one sentence.
+2. **List 2-4 viable options**, each with a one-line trade-off.
+3. **Give your recommendation** with one-line reasoning.
+4. **Then ask** (or proceed if you've been authorized to act on the recommendation).
+
+Example:
+
+> The 4 idle `iss-*` listeners are parked but counted toward the window cap. Two ways to free slots:
+> - **A:** close them yourself in tmux (free 4 slots; you lose scrollback I haven't surfaced).
+> - **B:** I dispatch with `MAX_TMUX_WINDOWS=12` raised in `.swarm/.env` (no closures needed; permanently raises the ceiling).
+> - **C:** Wait for the in-flight workers to merge their PRs before fanning out.
+>
+> **Recommend A** — your scrollback patterns suggest you've already reviewed those panes; the slot reclaim is cheap. **Want me to dispatch the next 4 once you've closed them?**
+
+Avoid the anti-patterns:
+- "I'll just do X" without surfacing alternatives (denies the user agency).
+- "What would you like to do?" without options (asks them to invent the menu).
+- "X, Y, or Z?" without a recommendation (denies them the SME view they came to you for).
+- Burying the decision in narrative (the user has to read 3 paragraphs to find the question).
+
+**The four-step pattern is non-negotiable.** Even when the recommendation is obvious, surface the alternatives — the user may have context you don't.
