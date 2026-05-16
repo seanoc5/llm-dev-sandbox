@@ -159,6 +159,15 @@ fi
 
 # 2. Queue dirs (idempotent — listener also creates them on startup)
 mkdir -p "$WT/.swarm/tasks/inbox" "$WT/.swarm/tasks/processing" "$WT/.swarm/tasks/done"
+
+# Hide worker scratch (.swarm/) from the project's git view so `gh pr create`
+# and `git status` don't flag it as an uncommitted/untracked change. Uses the
+# per-clone info/exclude (not the tracked .gitignore), so the project repo's
+# committed files are untouched. Idempotent — only appends once.
+exclude_file="$(git -C "$WT" rev-parse --git-path info/exclude 2>/dev/null || true)"
+if [ -n "$exclude_file" ] && [ -f "$exclude_file" ] && ! grep -qxF '.swarm/' "$exclude_file"; then
+    printf '\n# llm-dev-sandbox worker scratch (added by provision-worker.sh)\n.swarm/\n' >> "$exclude_file"
+fi
 echo "[2/4] queue dirs ready"
 
 # 3. Build task brief atomically (mktemp+mv inside same FS = atomic rename)
