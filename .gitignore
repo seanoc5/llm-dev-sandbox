@@ -1,7 +1,17 @@
 .tools/
 *.bak
+
+# Editor / IDE local config
+.vscode/
 .idea/
+*.swp
+*~
 
 # Swarm runtime state (events log, optional .env, task queues).
 # coordinator.md describes everything here as runtime artifacts.
 .swarm/
+
+# Demo recording artifacts
+*.mp4
+*.gif
+demo-*.png

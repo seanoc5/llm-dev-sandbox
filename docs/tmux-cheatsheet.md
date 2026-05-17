@@ -2,8 +2,10 @@
 
 A short reference to the tmux commands that actually come up when you're running `llm-start.sh` and managing a worker swarm. Not exhaustive — see `man tmux` for the full surface.
 
+> **Note:** Default tmux prefix is `Ctrl-b`. If you've rebound it (e.g. `Ctrl-Space` or `Ctrl-a`), substitute your prefix below wherever you see `<prefix>`.
+
 Conventions used below:
-- `Ctrl-b` = the default tmux **prefix key**. After pressing it (briefly) you then press the next key.
+- `<prefix>` = your tmux **prefix key** (see note above). After pressing it (briefly) you then press the next key.
 - `<session>` = your swarm session name — typically `llm-<project-basename>` (e.g. `llm-fand-app`).
 
 ---
@@ -15,7 +17,7 @@ Conventions used below:
 | List sessions on this host                                    | `tmux ls`                                                                                      |
 | Attach (mirror — other clients stay attached)                 | `tmux attach -t <session>`                                                                     |
 | Attach AND detach any other clients first (clean handoff)     | `tmux attach -d -t <session>`                                                                  |
-| Detach yourself (leaves session running in background)        | Inside tmux: `Ctrl-b d`                                                                       |
+| Detach yourself (leaves session running in background)        | Inside tmux: `<prefix> d`                                                                     |
 
 **Multi-attach / sizing**: tmux fits the session to the **smallest** attached client by default. If your laptop terminal is 120×40 and your desk monitor is 200×60, attaching from the laptop without `-d` will shrink the session to 120×40 in both terminals. Use `tmux attach -d -t …` to claim exclusive control, or use a session group (#10 below) for truly independent views.
 
@@ -25,18 +27,18 @@ Conventions used below:
 |---------------------------------------------------------------|------------------------------------------------------------------------------------------------|
 | Kill one session                                              | `tmux kill-session -t <session>`                                                               |
 | Kill the tmux server entirely (all sessions)                  | `tmux kill-server`                                                                            |
-| Rename current session                                        | Inside tmux: `Ctrl-b $`                                                                        |
+| Rename current session                                        | Inside tmux: `<prefix> $`                                                                      |
 | Check whether a session exists (scriptable)                   | `tmux has-session -t <session>` (exit 0 = exists)                                              |
 
 ## 3. Window navigation (each `iss-N` worker is a window)
 
 | What                                                          | Command                                                                                       |
 |---------------------------------------------------------------|------------------------------------------------------------------------------------------------|
-| Next / previous window                                        | `Ctrl-b n` / `Ctrl-b p`                                                                       |
-| Jump to window by number                                      | `Ctrl-b 0` … `Ctrl-b 9`                                                                       |
-| Pick window from a list (with previews)                       | `Ctrl-b w`                                                                                    |
-| Find window by name (substring search)                        | `Ctrl-b f` then type `iss-215`                                                                 |
-| Show window number of currently-focused window                 | `Ctrl-b q`                                                                                     |
+| Next / previous window                                        | `<prefix> n` / `<prefix> p`                                                                   |
+| Jump to window by number                                      | `<prefix> 0` … `<prefix> 9`                                                                   |
+| Pick window from a list (with previews)                       | `<prefix> w`                                                                                  |
+| Find window by name (substring search)                        | `<prefix> f` then type `iss-215`                                                               |
+| Show window number of currently-focused window                 | `<prefix> q`                                                                                   |
 
 ## 4. Inspecting a worker without disturbing it (capture-pane)
 
@@ -59,7 +61,7 @@ tmux capture-pane -t <session>:<window> -p -S - > /tmp/iss-215-full.log
 
 | What                                                          | Command                                                                                       |
 |---------------------------------------------------------------|------------------------------------------------------------------------------------------------|
-| Enter copy/scrollback mode                                    | `Ctrl-b [`                                                                                    |
+| Enter copy/scrollback mode                                    | `<prefix> [`                                                                                  |
 | Scroll up / down (in copy mode)                                | `PgUp` / `PgDn`, or arrow keys                                                                 |
 | Search backward                                                | `Ctrl-r` then type term, `Enter`                                                               |
 | Search forward                                                 | `Ctrl-s`                                                                                       |
@@ -167,4 +169,4 @@ set -g prefix C-a
 bind C-a send-prefix
 ```
 
-(One last `Ctrl-b` before the rebind takes effect for the current session.)
+(One last press of the old prefix before the rebind takes effect for the current session.)
