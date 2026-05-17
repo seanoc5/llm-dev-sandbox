@@ -1,5 +1,7 @@
 # LLM Swarm Runner
 
+**TL;DR:** llm-swarm-runner points Claude Code (or Gemini CLI) at your GitHub issue backlog and lets a pool of sandboxed agents chew through it in parallel — each in its own git worktree, each in a Docker container, all visible live in tmux. You stay in the driver's seat; the swarm handles the parallelism, the isolation, and the bookkeeping.
+
 A local-first **Claude Code swarm runner** for your own GitHub backlog.
 
 A one-shot coordinator agent triages open issues, provisions isolated workers in **git worktrees**, and an event-driven watcher tops the swarm up as issues finish. Workers run in Docker sandboxes with `--network host`, so they can talk to your local Postgres, Spring Boot, etc. exactly as you do. Tmux gives you live observation of every worker.
