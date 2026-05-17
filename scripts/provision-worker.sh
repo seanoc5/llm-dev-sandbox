@@ -61,7 +61,7 @@ CONFIG  (precedence: shell env > <project>/.swarm/.env > <sandbox>/.env.example)
     MAX_TMUX_WINDOWS    10        total session window cap
     WORKER_VERBOSITY    verbose   worker communication level
     SANDBOX_SH          (auto)    path to sandbox.sh used by the listener
-    LLM_SANDBOX_DIR     (auto)    sandbox install dir
+    LLM_SWARM_DIR     (auto)    sandbox install dir
 
 EVENTS LOG
     Appends to <project>/.swarm/events.log:
@@ -105,8 +105,8 @@ SESSION_NAME="llm-$(basename "$PROJECT_DIR")"
 # Self-locate so SANDBOX_SH default follows the script. Override with
 # SANDBOX_SH=<path> when running a non-standard install.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LLM_SANDBOX_DIR="${LLM_SANDBOX_DIR:-$(dirname "$SCRIPT_DIR")}"
-SANDBOX_SH="${SANDBOX_SH:-$LLM_SANDBOX_DIR/sandbox.sh}"
+LLM_SWARM_DIR="${LLM_SWARM_DIR:-$(dirname "$SCRIPT_DIR")}"
+SANDBOX_SH="${SANDBOX_SH:-$LLM_SWARM_DIR/sandbox.sh}"
 
 # Apply <project>/.swarm/.env then sandbox .env.example before reading caps,
 # so caller env > project file > sandbox defaults. Normally the tmux session
@@ -127,13 +127,13 @@ export WORKER_VERBOSITY
 
 # Path to the always-injected worker baseline (communication conventions).
 # Lives in the sandbox repo; copied verbatim to the top of every worker brief.
-WORKER_BASE_MD="$LLM_SANDBOX_DIR/prompts/worker-base.md"
+WORKER_BASE_MD="$LLM_SWARM_DIR/prompts/worker-base.md"
 
 # Reference-docs index. Cat'd into every brief after worker-base.md so workers
-# know what authoritative docs are available under $LLM_SANDBOX_DOCS/ inside
+# know what authoritative docs are available under $LLM_SWARM_DOCS/ inside
 # their container. The docs themselves are reachable via the sandbox-dir
 # bind mount in sandbox.sh.
-WORKER_REFS_MD="$LLM_SANDBOX_DIR/prompts/refs.md"
+WORKER_REFS_MD="$LLM_SWARM_DIR/prompts/refs.md"
 
 # Append-only structured event log. Same format as coordinator-watch.sh.
 EVENTS_LOG="$PROJECT_DIR/.swarm/events.log"
@@ -172,7 +172,7 @@ mkdir -p "$WT/.swarm/tasks/inbox" "$WT/.swarm/tasks/processing" "$WT/.swarm/task
 # committed files are untouched. Idempotent — only appends once.
 exclude_file="$(git -C "$WT" rev-parse --git-path info/exclude 2>/dev/null || true)"
 if [ -n "$exclude_file" ] && [ -f "$exclude_file" ] && ! grep -qxF '.swarm/' "$exclude_file"; then
-    printf '\n# llm-dev-sandbox worker scratch (added by provision-worker.sh)\n.swarm/\n' >> "$exclude_file"
+    printf '\n# llm-swarm-runner worker scratch (added by provision-worker.sh)\n.swarm/\n' >> "$exclude_file"
 fi
 echo "[2/4] queue dirs ready"
 
@@ -203,7 +203,7 @@ TMP="$(mktemp -p "$WT/.swarm/tasks/inbox" .tmp.XXXXXX.md)"
         echo
     fi
     # 1b. Reference-docs index: tells the worker what authoritative docs live
-    #     under $LLM_SANDBOX_DOCS/ (mounted ro into the container) and when to
+    #     under $LLM_SWARM_DOCS/ (mounted ro into the container) and when to
     #     consult them. Index is small; the doc bodies stay on disk until needed.
     if [ -f "$WORKER_REFS_MD" ]; then
         cat "$WORKER_REFS_MD"

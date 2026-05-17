@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-05-05
-- **Issue:** [#7](https://github.com/seanoc5/llm-dev-sandbox/issues/7)
+- **Issue:** [#7](https://github.com/seanoc5/llm-swarm-runner/issues/7)
 - **Deciders:** @seanoc5
 
 ## Context
@@ -73,4 +73,4 @@ Implementation lands in fix/issue-7:
 ## References
 
 - Anthropic: [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action)
-- Conversation that prompted this ADR: 2026-05-05 review of `llm-dev-sandbox` vs GH Actions.
+- Conversation that prompted this ADR: 2026-05-05 review of `llm-swarm-runner` vs GH Actions.

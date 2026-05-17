@@ -13,7 +13,7 @@ red()    { printf '\033[31m%s\033[0m\n' "$*"; }
 
 TEST_DIR="/tmp/swarm-e2e-$(date +%s)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
-LLM_SANDBOX_DIR="${LLM_SANDBOX_DIR:-$(dirname "$SCRIPT_DIR")}"
+LLM_SWARM_DIR="${LLM_SWARM_DIR:-$(dirname "$SCRIPT_DIR")}"
 
 echo "=== Swarm E2E Test ==="
 yellow "Cleaning up previous sessions..."
@@ -24,7 +24,7 @@ mkdir -p "$TEST_DIR/main-repo"
 # Copy the .env file so the agent can authenticate. Search a few well-known
 # locations; if nothing matches, the test continues without auth (expected
 # to fail at the LLM call but useful for shape verification).
-ENV_CANDIDATES=("$LLM_SANDBOX_DIR/.env" "$HOME/.env")
+ENV_CANDIDATES=("$LLM_SWARM_DIR/.env" "$HOME/.env")
 [ -n "${LLM_ENV_FILES:-}" ] && IFS=':' read -ra _extra <<< "$LLM_ENV_FILES" && ENV_CANDIDATES+=("${_extra[@]}")
 ENV_COPIED=0
 for _env in "${ENV_CANDIDATES[@]}"; do

@@ -148,10 +148,10 @@ The host Docker socket (`/var/run/docker.sock`) is mounted automatically when pr
 
 ```bash
 # After Dockerfile changes
-docker build -t llm-sandbox:latest .
+docker build -t llm-swarm-runner:latest .
 
 # Force a full rebuild (no cache)
-docker build --no-cache -t llm-sandbox:latest .
+docker build --no-cache -t llm-swarm-runner:latest .
 ```
 
 ## Worker Escape Hatch (Ctrl-Z drops to shell)
@@ -171,7 +171,7 @@ Three pieces have to line up:
 | Tmux intercepts Ctrl-Z in `iss-*` windows and runs the helper script | `~/.tmux.conf` (you install this) |
 | Helper resolves the session/window names and `docker exec`s in | `scripts/tmux-worker-shell.sh` |
 
-The binding (copy this block into `~/.tmux.conf` — also included in [`examples/tmux.conf.example`](../examples/tmux.conf.example)). Adjust the absolute path to where you cloned `llm-dev-sandbox`:
+The binding (copy this block into `~/.tmux.conf` — also included in [`examples/tmux.conf.example`](../examples/tmux.conf.example)). Adjust the absolute path to where you cloned `llm-swarm-runner`:
 
 ```tmux
 # Worker (iss-*) Ctrl-Z escape hatch.
@@ -179,7 +179,7 @@ The binding (copy this block into `~/.tmux.conf` — also included in [`examples
 # into the same worker container as a login shell. claude keeps running.
 # In any other window, Ctrl-Z falls through to normal behavior.
 bind-key -n C-z if-shell -F '#{m:iss-*,#{window_name}}' \
-    'split-window -h "/opt/work/sysadmin/llm-dev-sandbox/scripts/tmux-worker-shell.sh"' \
+    'split-window -h "/opt/work/sysadmin/llm-swarm-runner/scripts/tmux-worker-shell.sh"' \
     'send-keys C-z'
 ```
 
@@ -244,7 +244,7 @@ Use `COORDINATOR_CMD=claude` for this — claude streams tool calls cleanly to t
 
 ```bash
 cd /opt/work/myproject
-COORDINATOR_CMD=claude $LLM_SANDBOX_DIR/llm-start.sh "$(cat <<'EOF'
+COORDINATOR_CMD=claude $LLM_SWARM_DIR/llm-start.sh "$(cat <<'EOF'
 Triage the existing worker worktrees. READ-ONLY — do NOT push, do NOT
 open PRs, do NOT merge, do NOT close issues, do NOT remove worktrees,
 do NOT provision new workers.
@@ -301,7 +301,7 @@ If the coordinator's READY list is short, do them by hand. If it's long, you can
 The worker's branch contains a mix of valuable new work AND stale changes that conflict with master (because master moved while the worker ran). Drop a brief telling a fresh worker to reset and re-apply only the salvageable parts:
 
 ```bash
-cat <<'BRIEF' | $LLM_SANDBOX_DIR/scripts/requeue.sh N -
+cat <<'BRIEF' | $LLM_SWARM_DIR/scripts/requeue.sh N -
 ## Surgical re-do for issue #N
 
 Your earlier work added <X valuable thing> AND a rewrite of <Y> that
@@ -329,7 +329,7 @@ BRIEF
 Same shape as NEEDS_REVIEW, but the brief just enumerates the remaining scope:
 
 ```bash
-cat <<'BRIEF' | $LLM_SANDBOX_DIR/scripts/requeue.sh N -
+cat <<'BRIEF' | $LLM_SWARM_DIR/scripts/requeue.sh N -
 ## Follow-up to your prior work on issue #N
 
 You completed <subset>. The issue scope was <full set> — <remainder> remains:
@@ -347,11 +347,11 @@ BRIEF
 
 ```bash
 # single
-$LLM_SANDBOX_DIR/scripts/kill-worktree.sh N
+$LLM_SWARM_DIR/scripts/kill-worktree.sh N
 
 # batch
 for issue in <list>; do
-    $LLM_SANDBOX_DIR/scripts/kill-worktree.sh "$issue"
+    $LLM_SWARM_DIR/scripts/kill-worktree.sh "$issue"
 done
 ```
 
@@ -366,7 +366,7 @@ cd /opt/work/myproject
 
 # 1. Recreate the session if needed (status-only prompt — read-only)
 tmux has-session -t "llm-$(basename $PWD)" 2>/dev/null || \
-    NON_INTERACTIVE=1 $LLM_SANDBOX_DIR/llm-start.sh \
+    NON_INTERACTIVE=1 $LLM_SWARM_DIR/llm-start.sh \
         "Status check ONLY — list worktrees and recent outcomes."
 
 # 2. Spawn a listener window per worktree you'll act on
@@ -376,7 +376,7 @@ for issue in <list>; do
     SESSION="llm-$(basename $PWD)"
     tmux list-windows -t "$SESSION" -F '#W' 2>/dev/null | grep -qx "iss-$issue" || \
         tmux new-window -d -t "$SESSION" -n "iss-$issue" \
-            "$LLM_SANDBOX_DIR/sandbox.sh $WT listener"
+            "$LLM_SWARM_DIR/sandbox.sh $WT listener"
 done
 
 # 3. Verify

@@ -1,4 +1,4 @@
-# tmux.conf.example — starter config tuned for the llm-dev-sandbox swarm workflow
+# tmux.conf.example — starter config tuned for the llm-swarm-runner swarm workflow
 #
 # Copy to your home dir and reload:
 #     cp examples/tmux.conf.example ~/.tmux.conf
@@ -109,9 +109,9 @@ bind r source-file ~/.tmux.conf \; display-message "~/.tmux.conf reloaded"
 # tmux-worker-shell.sh resolves them at run time via `tmux display-message
 # -p -t "$TMUX_PANE"`, which does expand formats.
 #
-# Adjust the absolute path below to where you cloned llm-dev-sandbox.
+# Adjust the absolute path below to where you cloned llm-swarm-runner.
 bind-key -n C-z if-shell -F '#{m:iss-*,#{window_name}}' \
-    'split-window -h "/opt/work/sysadmin/llm-dev-sandbox/scripts/tmux-worker-shell.sh"' \
+    'split-window -h "/opt/work/sysadmin/llm-swarm-runner/scripts/tmux-worker-shell.sh"' \
     'send-keys C-z'
 
 # === Session persistence (tmux-resurrect + tmux-continuum) =================

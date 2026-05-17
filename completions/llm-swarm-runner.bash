@@ -1,11 +1,11 @@
-# llm-dev-sandbox bash completion
+# llm-swarm-runner bash completion
 #
 # Source from your ~/.bashrc:
-#     . /path/to/llm-dev-sandbox/completions/llm-dev-sandbox.bash
+#     . /path/to/llm-swarm-runner/completions/llm-swarm-runner.bash
 #
 # Or copy into the XDG bash-completion dir for lazy-load:
 #     mkdir -p ~/.local/share/bash-completion/completions
-#     cp llm-dev-sandbox.bash ~/.local/share/bash-completion/completions/llm-start.sh
+#     cp llm-swarm-runner.bash ~/.local/share/bash-completion/completions/llm-start.sh
 #
 # Provides flag completion for the three user-facing entry points.
 # No dependency on the bash-completion package — uses only POSIX-y compgen.

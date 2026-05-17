@@ -109,7 +109,7 @@ WORKSPACE="$(realpath "${WORKSPACE:-$(dirname "$PROJECT_DIR")}")"
 # Self-locate so defaults follow the script wherever it lives. LLM_START and
 # SWEEP env overrides still win for non-standard installs.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LLM_SANDBOX_DIR="${LLM_SANDBOX_DIR:-$(dirname "$SCRIPT_DIR")}"
+LLM_SWARM_DIR="${LLM_SWARM_DIR:-$(dirname "$SCRIPT_DIR")}"
 
 # Apply <project>/.swarm/.env then sandbox .env.example before reading
 # tunables, so caller env > project file > sandbox defaults. This script
@@ -121,7 +121,7 @@ LLM_SANDBOX_DIR="${LLM_SANDBOX_DIR:-$(dirname "$SCRIPT_DIR")}"
 DEBOUNCE_SECS="${DEBOUNCE_SECS:-30}"
 DRY_RUN="${DRY_RUN:-0}"
 ONCE="${ONCE:-0}"
-LLM_START="${LLM_START:-$LLM_SANDBOX_DIR/llm-start.sh}"
+LLM_START="${LLM_START:-$LLM_SWARM_DIR/llm-start.sh}"
 # Default wake prompt: top-up mode. The coordinator triages, then refills
 # alive worker count toward MAX_WORKERS (subject to MAX_TMUX_WINDOWS) using
 # the AVAILABLE filter defined in prompts/coordinator.md. To suppress
@@ -130,7 +130,7 @@ LLM_START="${LLM_START:-$LLM_SANDBOX_DIR/llm-start.sh}"
 WAKE_PROMPT="${WAKE_PROMPT:-Worker(s) just finished. Triage their outcome JSONs in worktrees/.swarm/tasks/done/, then top up workers per the Initial Startup Checklist (compute AVAILABLE, count alive workers, fill open slots up to MAX_WORKERS subject to MAX_TMUX_WINDOWS). Use the @me-or-unassigned filter unless INCLUDE_ASSIGNED_TO_OTHERS=1.}"
 POLL_SECS="${POLL_SECS:-2}"
 POST_OUTCOMES="${POST_OUTCOMES:-0}"
-SWEEP="${SWEEP:-$LLM_SANDBOX_DIR/scripts/sweep-swarm-outcomes.sh}"
+SWEEP="${SWEEP:-$LLM_SWARM_DIR/scripts/sweep-swarm-outcomes.sh}"
 
 # Append-only structured event log. Every observable event (start, outcome,
 # wake, sweep, cap-refusal) gets a single line so `tail -F` gives live status.

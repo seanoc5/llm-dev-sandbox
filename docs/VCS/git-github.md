@@ -1,8 +1,8 @@
 # Git & GitHub: Tips for Swarm Programming
 
-The llm-dev-sandbox is a tool, not a git tutorial — but every swarm session ends with you reviewing and merging pull requests, and that is squarely a git-and-`gh` job. Workers branch from `main`, push to GitHub, open PRs; the coordinator orchestrates them; **you** decide which PRs land and in what order. When a PR can't auto-merge because two workers touched the same lines, the cleanup falls to you.
+The llm-swarm-runner is a tool, not a git tutorial — but every swarm session ends with you reviewing and merging pull requests, and that is squarely a git-and-`gh` job. Workers branch from `main`, push to GitHub, open PRs; the coordinator orchestrates them; **you** decide which PRs land and in what order. When a PR can't auto-merge because two workers touched the same lines, the cleanup falls to you.
 
-This doc is a focused crib sheet for that role. It's not a comprehensive git reference — it points to those — and it's not specific to llm-dev-sandbox the codebase. It is specific to the **swarm workflow**: many short-lived PRs, frequent main-branch movement, and a non-zero conflict rate as a steady-state condition rather than a once-a-month anomaly. If your git skills are thin and you're picking up volume in this workflow, start here.
+This doc is a focused crib sheet for that role. It's not a comprehensive git reference — it points to those — and it's not specific to llm-swarm-runner the codebase. It is specific to the **swarm workflow**: many short-lived PRs, frequent main-branch movement, and a non-zero conflict rate as a steady-state condition rather than a once-a-month anomaly. If your git skills are thin and you're picking up volume in this workflow, start here.
 
 > **Tip:** for the orchestration side of swarm work (spawning workers, watching for outcomes, killing stuck containers), see [`../advanced-usage.md`](../advanced-usage.md). For when something in git breaks weird, see [`../troubleshooting.md`](../troubleshooting.md) — git-specific entries live under "Git & SSH" there.
 
@@ -14,6 +14,7 @@ This doc is a focused crib sheet for that role. It's not a comprehensive git ref
 - [The main event: resolving conflicts in a PR](#the-main-event-resolving-conflicts-in-a-pr)
   - [Merge approach (safer, recommended for non-experts)](#merge-approach-safer-recommended-for-non-experts)
   - [Rebase approach (cleaner history, more risk)](#rebase-approach-cleaner-history-more-risk)
+  - [Using a GUI mergetool (skip the marker bookkeeping)](#using-a-gui-mergetool-skip-the-marker-bookkeeping)
   - [Resolving from the GitHub web UI](#resolving-from-the-github-web-ui)
   - [Choosing merge vs. rebase](#choosing-merge-vs-rebase)
 - [Cheat sheet: swarm-flavored git/gh](#cheat-sheet-swarm-flavored-gitgh)
@@ -144,6 +145,46 @@ git push --force-with-lease       # NOT plain --force — see below
 
 **If a rebase goes sideways:** `git rebase --abort` returns you to the pre-rebase state, including the original commits unchanged.
 
+### Using a GUI mergetool (skip the marker bookkeeping)
+
+Both the merge and rebase approaches above describe hand-editing conflict markers (`<<<<<<<`/`=======`/`>>>>>>>`) in a regular text editor. That works, but it has two downsides:
+
+1. The markers only show **two** of the three pieces that matter (your version and theirs); they hide the **common ancestor**, which is what makes a conflict actually understandable.
+2. It's easy to forget to delete a marker line and commit a broken file.
+
+`git mergetool` solves both. After a conflicted `git merge` or `git rebase`, instead of opening the files manually, run:
+
+```bash
+git mergetool                     # opens your configured 3-way merger for each conflicted file
+```
+
+The tool shows you LOCAL (your branch) / BASE (common ancestor) / REMOTE (their branch) side by side, lets you pick hunks or hand-edit a merged result, and writes a clean file (no markers) on save. `git mergetool` also auto-stages each file after you finish it, so you can skip `git add` and go straight to `git merge --continue` (or `git rebase --continue`) when all files are done.
+
+One-time setup:
+
+```bash
+git config --global merge.tool <tool-name>        # see options below
+git config --global mergetool.prompt false        # don't ask "launch <tool>?" each time
+git config --global mergetool.keepBackup false    # skip the .orig backup files mergetool would otherwise leave behind
+```
+
+Official docs: [git-mergetool(1)](https://git-scm.com/docs/git-mergetool) — covers the full set of recognized tools and per-tool config keys (e.g. `mergetool.<tool>.cmd` for custom invocations).
+
+**Tool options (pick one):**
+
+| Tool | `merge.tool` value | Notes |
+|---|---|---|
+| **meld** | `meld` | GTK GUI; the maintainer's preference for Linux desktop work. Polished 3-way view, simple keyboard shortcuts, ships in every distro. Most-recommended Linux GUI mergetool. |
+| kdiff3 | `kdiff3` | Older KDE-flavored 3-way merger. Very capable but the UI feels dated. Strong fan base. |
+| VS Code | `vscode` (with `mergetool.vscode.cmd = "code --wait --merge $REMOTE $LOCAL $BASE $MERGED"`) | Built-in 3-way merge editor in modern VS Code. Great if you already live in the editor. |
+| JetBrains IDE (IntelliJ/PyCharm/etc.) | `idea` (or set up via the IDE's "Use as external merge tool" preference) | Excellent integrated 3-way merge if you have the IDE open anyway. |
+| vimdiff / nvimdiff | `vimdiff` / `nvimdiff` | Terminal-only, works over SSH. Steep learning curve but no GUI dependency. |
+| Beyond Compare | `bc` | Paid/commercial, cross-platform. Loved by some former Perforce/Windows users. |
+
+You're not locked in — `merge.tool` is just a default; you can also run `git mergetool --tool=<other>` for a one-off.
+
+**When NOT to use mergetool:** For trivial one-line conflicts (e.g. two PRs both bumping the same version string), just edit the file directly. Opening a GUI for a 5-second fix is overkill — the conflict markers are perfectly readable when the conflict is two lines long. Mergetool pays off when the conflict is more than ~10 lines or involves logic you need to think about with the base version in view.
+
 ### Resolving from the GitHub web UI
 
 GitHub's web UI has a built-in conflict resolver, accessible via the **Resolve conflicts** button on the PR's conversation tab when conflicts exist. It works for simple cases (a handful of files, single-line edits) and is fine for that. For anything beyond trivial, prefer the local merge/rebase approach — the editor in the web UI is a textarea, no syntax highlighting, no test-running, easy to introduce subtle bugs.
@@ -253,7 +294,7 @@ Bookmarked from [ohshitgit.com](https://ohshitgit.com/) and adapted for swarm sc
 
 ## Swarm-specific patterns and gotchas
 
-Things that bite specifically because of how llm-dev-sandbox uses git:
+Things that bite specifically because of how llm-swarm-runner uses git:
 
 - **One branch per worker, named `iss-N`.** Don't reuse a branch across workers; the coordinator and provision-worker.sh assume a fresh branch per spawn. If you need to retry a worker on the same issue, delete the old branch + worktree first.
 - **Workers commit inside isolated worktrees.** Each `wt-issue-N` directory has its own working tree, index, and HEAD, but all of them share the same `.git/objects` store. This means `git log` from any worktree sees commits from every worktree — useful for spotting cross-worker activity, occasionally confusing.

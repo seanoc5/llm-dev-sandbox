@@ -11,7 +11,7 @@ set -euo pipefail
 VERBOSE=false
 [[ "${1:-}" == "-v" ]] && VERBOSE=true
 
-IMAGE="llm-sandbox:latest"
+IMAGE="llm-swarm-runner:latest"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PASS=0
 FAIL=0

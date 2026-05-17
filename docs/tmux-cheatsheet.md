@@ -108,11 +108,11 @@ When you see `Pane is dead (status 1, ...)`:
 # Just close it and re-spawn the window
 tmux kill-window -t llm-fand-app:watch
 tmux new-window -t llm-fand-app -n watch \
-    "/opt/work/sysadmin/llm-dev-sandbox/scripts/coordinator-watch.sh /opt/work/oconeco/fand-app"
+    "/opt/work/sysadmin/llm-swarm-runner/scripts/coordinator-watch.sh /opt/work/oconeco/fand-app"
 
 # OR with the alternative respawn-pane (preserves window number, scrollback gone):
 tmux respawn-pane -k -t llm-fand-app:watch \
-    "/opt/work/sysadmin/llm-dev-sandbox/scripts/coordinator-watch.sh /opt/work/oconeco/fand-app"
+    "/opt/work/sysadmin/llm-swarm-runner/scripts/coordinator-watch.sh /opt/work/oconeco/fand-app"
 ```
 
 `respawn-pane -k` kills any process in the pane first; without `-k` it errors if the pane already has a live process.

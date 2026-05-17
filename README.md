@@ -1,13 +1,25 @@
-# LLM Dev Sandbox
+# LLM Swarm Runner
 
-A persistent, local-first **convenience-isolation layer** for running LLM agents like **Claude Code**, **Gemini CLI**, and **promptfoo** against your real host services.
+A local-first **Claude Code swarm runner** for your own GitHub backlog.
 
-Running autonomous LLM agents directly on your host is risky — agents can hallucinate destructive shell commands. This wrapper reduces blast radius for honest mistakes (typos, hallucinated `rm -rf`, wrong cwd) by running the agent inside a Docker container that only has the project dir mounted rw plus the auth state it needs.
+A one-shot coordinator agent triages open issues, provisions isolated workers in **git worktrees**, and an event-driven watcher tops the swarm up as issues finish. Workers run in Docker sandboxes with `--network host`, so they can talk to your local Postgres, Spring Boot, etc. exactly as you do. Tmux gives you live observation of every worker.
+
+Also works as a single-agent sandbox if you don't want the swarm — `sandbox.sh <project> claude` gives you a safer shell around one agent. Supports **Claude Code**, **Gemini CLI**, and **promptfoo**.
 
 > ⚠️ **This is NOT a security boundary against a hostile / compromised agent.**
 > The container runs with `--network host`, mounts `/var/run/docker.sock` for Docker-out-of-Docker, mounts `~/.claude` rw and `~/.ssh` ro, and the agents run with `--dangerously-skip-permissions` / `--yolo`. A sufficiently-capable agent inside the container can spawn sibling containers with `-v /:/host`, exfiltrate your gh token, push to your repos, etc. Treat the agents as **trusted-but-fallible**, not as adversaries. See [`docs/security.md`](./docs/security.md) for blast-radius details.
 
-By running locally with `--network host`, the agent can interact with your entire local development environment (e.g., local Postgres, Spring Boot) exactly as you do, without complex tunneling.
+## Who this is for / not for
+
+**For you if:**
+- You already use Claude Code or Gemini CLI and want to run several in parallel against real backlogs.
+- You'd rather observe workers live in tmux than rely on a hosted dashboard.
+- You're OK accepting "trusted-but-fallible agent" as the threat model (see [`docs/security.md`](./docs/security.md)).
+
+**Not for you if:**
+- You need agent isolation strong enough to run untrusted / adversarial models.
+- You want a managed or hosted orchestrator — this is local-first and BYO-machine.
+- You don't already have Docker running and `gh` authenticated on the host.
 
 ---
 
@@ -43,24 +55,24 @@ For deep-dives into specific topics, please refer to the reference documentation
 
 ### 2. Install
 ```bash
-git clone git@github.com:seanoc5/llm-dev-sandbox.git
-cd llm-dev-sandbox
-docker build -t llm-sandbox:latest .
+git clone git@github.com:seanoc5/llm-swarm-runner.git
+cd llm-swarm-runner
+docker build -t llm-swarm-runner:latest .
 
 # One-time host-side setup (idempotent; re-run after gemini-cli upgrades).
-# At the end it prints the recommended LLM_SANDBOX_DIR + PATH exports for
+# At the end it prints the recommended LLM_SWARM_DIR + PATH exports for
 # your shell rc — copy them into ~/.bashrc / ~/.zshrc.
 ./scripts/setup.sh
 ```
 
-The clone path is up to you — every script self-locates via `BASH_SOURCE`, so `git clone … && cd … && ./llm-start.sh` works from anywhere. Setting `LLM_SANDBOX_DIR` in your shell rc is only needed when you run scripts from outside the repo or via wrappers that don't preserve the path.
+The clone path is up to you — every script self-locates via `BASH_SOURCE`, so `git clone … && cd … && ./llm-start.sh` works from anywhere. Setting `LLM_SWARM_DIR` in your shell rc is only needed when you run scripts from outside the repo or via wrappers that don't preserve the path.
 
 `scripts/setup.sh` symlinks the system `rg` into the path `@google/gemini-cli` looks for (the npm package omits its bundled binary). Without it gemini logs `Ripgrep is not available. Falling back to GrepTool.` on every run and uses a slower built-in matcher.
 
 For tab-completion of `llm-start.sh` flags (and the helper scripts), add this line to your `~/.bashrc`:
 
 ```bash
-. "$LLM_SANDBOX_DIR/completions/llm-dev-sandbox.bash"
+. "$LLM_SWARM_DIR/completions/llm-swarm-runner.bash"
 ```
 
 `setup.sh` prints this hint at the end of its run.
@@ -73,7 +85,7 @@ Let the coordinator triage your backlog and provision worker agents.
 cd /opt/work/myproject
 
 # Bootstrap the coordinator (claude default; COORDINATOR_CMD=gemini to use Gemini)
-$LLM_SANDBOX_DIR/llm-start.sh "Optional initial prompt; default: run startup checklist"
+$LLM_SWARM_DIR/llm-start.sh "Optional initial prompt; default: run startup checklist"
 ```
 This creates a dedicated `tmux` session, runs the coordinator in Window 1 with the prompt you supplied (default: survey GitHub issues + provision workers), and spawns isolated Claude worker agents in dockerized git worktrees, one per dispatched issue.
 
@@ -103,7 +115,7 @@ COORDINATOR_CMD=claude ./llm-start.sh "..."
 COORDINATOR_MODEL=gemini-3-flash-preview ./llm-start.sh "..."
 ```
 
-Full env-var reference in [`docs/llm-dev-sandbox-overview.md`](./docs/llm-dev-sandbox-overview.md#env-vars).
+Full env-var reference in [`docs/llm-swarm-runner-overview.md`](./docs/llm-swarm-runner-overview.md#env-vars).
 
 #### How the coordinator works
 
@@ -131,7 +143,7 @@ Other automation paths if you want them:
 - **Time-based:** add a `cron` / `systemd --user` timer running `llm-start.sh "Check status; advance any stalled workers"` every 15min — usually unnecessary if the watcher is on.
 - **Conversational:** drop `-p` and run `claude` / `gemini` interactively in Window 1 — possible but burns plan capacity while idle and the context window grows over time. Not recommended for a Max-plan user.
 
-See [`docs/llm-dev-sandbox-overview.md`](./docs/llm-dev-sandbox-overview.md) for the full architecture.
+See [`docs/llm-swarm-runner-overview.md`](./docs/llm-swarm-runner-overview.md) for the full architecture.
 
 #### Configuring caps and filters
 
@@ -230,10 +242,10 @@ If you just want a safe shell for a single agent:
 
 ```bash
 # Launch Claude Code inside the sandbox for your project
-$LLM_SANDBOX_DIR/sandbox.sh /path/to/project claude
+$LLM_SWARM_DIR/sandbox.sh /path/to/project claude
 
 # Launch Gemini CLI inside the sandbox
-$LLM_SANDBOX_DIR/sandbox.sh /path/to/project gemini
+$LLM_SWARM_DIR/sandbox.sh /path/to/project gemini
 ```
 
 ---

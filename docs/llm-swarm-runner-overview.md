@@ -1,4 +1,4 @@
-# llm-dev-sandbox: Project Overview
+# llm-swarm-runner: Project Overview
 
 A persistent, local-first sandbox for running autonomous LLM agents (Claude Code, Gemini CLI) against your real host services, with safety isolation provided by Docker + git worktrees + tmux. This document is the canonical reference for *how the pieces fit together*; for narrower topics see the other files in `docs/`.
 
@@ -63,7 +63,7 @@ Running autonomous LLM agents directly on your host is risky: a hallucinated `rm
 ```
 
 - **Coordinator** lives on the host (not containerized) so it can `tmux new-window`, `git worktree add`, and `gh` against your auth directly.
-- **Workers** live inside `llm-sandbox:latest` Docker containers (via `sandbox.sh`) so any destructive command they invent is blast-radius-limited.
+- **Workers** live inside `llm-swarm-runner:latest` Docker containers (via `sandbox.sh`) so any destructive command they invent is blast-radius-limited.
 
 ## Components
 
@@ -152,7 +152,7 @@ The cap/filter rows (last seven) are **also** loadable from `<project>/.swarm/.e
 
 #### Auto-discovery
 
-- **`GEMINI_API_KEY`**: when not in environment, walks `$PWD/.env` → `~/.gemini/.env` → `llm-dev-sandbox/.env` → `/opt/work/sysadmin/.env` and sources the first match. Propagated into the tmux session env via `tmux new-session -e` so the coordinator pane inherits it without a per-project `.env` copy.
+- **`GEMINI_API_KEY`**: when not in environment, walks `$PWD/.env` → `~/.gemini/.env` → `llm-swarm-runner/.env` → `/opt/work/sysadmin/.env` and sources the first match. Propagated into the tmux session env via `tmux new-session -e` so the coordinator pane inherits it without a per-project `.env` copy.
 - **Claude OAuth**: just works via the mounted `~/.claude/` config — no env vars needed. If `ANTHROPIC_API_KEY` *is* set, a warning is printed and the variable is stripped from the coordinator's env (override with `COORDINATOR_USE_API_KEY=1` to bill the API instead of the Max plan).
 
 #### Coordinator command construction (claude path)
@@ -319,11 +319,11 @@ ONCE=1 coordinator-watch.sh
 | `DEBOUNCE_SECS` | `30` | Coalesce N events into 1 wake when many workers finish near-simultaneously |
 | `DRY_RUN` | `0` | Log triggers without invoking llm-start.sh |
 | `ONCE` | `0` | Exit after first wake — for smoke-tests |
-| `LLM_START` | `$LLM_SANDBOX_DIR/llm-start.sh` | Override path |
+| `LLM_START` | `$LLM_SWARM_DIR/llm-start.sh` | Override path |
 | `WAKE_PROMPT` | (top-up prompt — see below) | What the coordinator does when woken |
 | `POLL_SECS` | `2` | Polling interval (polling backend only) |
 | `POST_OUTCOMES` | `0` | Set to `1` to also run `sweep-swarm-outcomes.sh` on each detected outcome. Honors `$OUTCOME_HOOK`. Fires outside the wake-debounce window so every outcome gets audit coverage even when wakes are coalesced. |
-| `SWEEP` | `$LLM_SANDBOX_DIR/scripts/sweep-swarm-outcomes.sh` | Override sweep path |
+| `SWEEP` | `$LLM_SWARM_DIR/scripts/sweep-swarm-outcomes.sh` | Override sweep path |
 
 The watcher also reads `MAX_WORKERS` / `MAX_TMUX_WINDOWS` / `TARGET_AVAILABLE` / `OWNER_LABELS` / `INCLUDE_ASSIGNED_TO_OTHERS` from the same precedence chain (shell env > project `.swarm/.env` > sandbox `.env.example`). It uses them in two places: (a) the startup `watch.start` event line, and (b) implicitly via the wake prompt referencing the caps so the coordinator computes slots correctly.
 
@@ -378,7 +378,7 @@ Hook exit `0` = success → sweep writes the `.posted` marker. Non-zero = retry 
 
 - Comment format is opinionated: PR link? Test results? Triage verdict? Each project differs.
 - Audit destination varies — could be Slack, Linear, an internal dashboard, not just GitHub.
-- Keeps `llm-dev-sandbox` agnostic about how a project tracks work.
+- Keeps `llm-swarm-runner` agnostic about how a project tracks work.
 
 **Why a sweep instead of automatic post-on-worker-exit:**
 
@@ -460,7 +460,7 @@ Defines the coordinator's startup checklist (read `.swarm-policy.md` → `git st
 
 ```bash
 git worktree add ../wt-issue-42 -b fix/issue-42
-tmux new-window -d -n "iss-42" "$LLM_SANDBOX_DIR/sandbox.sh ../wt-issue-42 listener"
+tmux new-window -d -n "iss-42" "$LLM_SWARM_DIR/sandbox.sh ../wt-issue-42 listener"
 echo "Fix issue #42. Details: $(gh issue view 42)" > ../wt-issue-42/.agent-task.md
 ```
 
@@ -563,7 +563,7 @@ npm view @anthropic-ai/claude-code version
 curl -s https://api.github.com/repos/astral-sh/uv/releases/latest | jq -r .tag_name
 
 # Bump the ARG in Dockerfile, OR override at build time:
-docker build --build-arg CLAUDE_CODE_VERSION=2.2.0 -t llm-sandbox:latest .
+docker build --build-arg CLAUDE_CODE_VERSION=2.2.0 -t llm-swarm-runner:latest .
 
 # Test the e2e suite to confirm nothing regressed:
 ./test-e2e-swarm.sh

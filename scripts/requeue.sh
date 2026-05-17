@@ -19,9 +19,9 @@
 set -euo pipefail
 
 # Self-locate so the printed help text references the actual install path,
-# not a hardcoded one. Override LLM_SANDBOX_DIR for non-standard installs.
+# not a hardcoded one. Override LLM_SWARM_DIR for non-standard installs.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LLM_SANDBOX_DIR="${LLM_SANDBOX_DIR:-$(dirname "$SCRIPT_DIR")}"
+LLM_SWARM_DIR="${LLM_SWARM_DIR:-$(dirname "$SCRIPT_DIR")}"
 
 TARGET="${1:?usage: requeue.sh <wt-path|issue-N> <brief-file|->}"
 SOURCE="${2:?usage: requeue.sh <wt-path|issue-N> <brief-file|->}"
@@ -73,11 +73,11 @@ if [ -n "$SESSION_NAME" ] && tmux has-session -t "$SESSION_NAME" 2>/dev/null; th
         echo "  WARN: session '$SESSION_NAME' is alive but has no iss-* listener window."
         echo "        Spawn one with:"
         echo "          tmux new-window -d -t $SESSION_NAME -n iss-XXX \\"
-        echo "              \"$LLM_SANDBOX_DIR/sandbox.sh $WT listener\""
+        echo "              \"$LLM_SWARM_DIR/sandbox.sh $WT listener\""
     fi
 else
     # shellcheck disable=SC2016  # single quotes are literal in the printed output
     echo "  WARN: no tmux session${SESSION_NAME:+ '$SESSION_NAME'} running."
     echo "        Brief is queued but nothing is polling. Start a listener with:"
-    echo "          $LLM_SANDBOX_DIR/sandbox.sh $WT listener"
+    echo "          $LLM_SWARM_DIR/sandbox.sh $WT listener"
 fi

@@ -2,7 +2,7 @@
 
 This is the **reference-docs index** available to you in this sandbox. When you encounter one of the triggers below, **stop and read the referenced doc before acting** — its content is more authoritative and current than your model knowledge. Reading takes seconds; making the wrong move because you "thought you remembered" costs much more.
 
-Each doc lives under `$LLM_SANDBOX_DOCS/` (a read-only bind mount inside your container). Read with `cat "$LLM_SANDBOX_DOCS/<path>"`. The env var is set; if for some reason it's not, the absolute path is also fine — it matches the host path.
+Each doc lives under `$LLM_SWARM_DOCS/` (a read-only bind mount inside your container). Read with `cat "$LLM_SWARM_DOCS/<path>"`. The env var is set; if for some reason it's not, the absolute path is also fine — it matches the host path.
 
 ## How to use this index
 
@@ -17,6 +17,6 @@ You may encounter a doc whose advice conflicts with something in `.swarm-policy.
 
 | When you encounter… | Read |
 |---|---|
-| A git merge conflict, rebase decision, lost-commit recovery, or any non-trivial git/`gh` operation you're unsure about | `$LLM_SANDBOX_DOCS/VCS/git-github.md` |
+| A git merge conflict, rebase decision, lost-commit recovery, or any non-trivial git/`gh` operation you're unsure about | `$LLM_SWARM_DOCS/VCS/git-github.md` |
 
 (More refs will be added as patterns emerge. Project-specific refs may be appended via `.swarm-policy.md`.)

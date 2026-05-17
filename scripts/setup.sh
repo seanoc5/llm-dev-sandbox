@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# setup.sh — Host-side setup for llm-dev-sandbox.
+# setup.sh — Host-side setup for llm-swarm-runner.
 #
 # Currently fixes one known issue: the npm-published @google/gemini-cli
 # package is missing its bundled ripgrep binary, but the agent still
@@ -15,7 +15,7 @@ green()  { printf '\033[32m%s\033[0m\n' "$*"; }
 yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
 red()    { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 
-echo "=== llm-dev-sandbox host setup ==="
+echo "=== llm-swarm-runner host setup ==="
 
 # --- 1. Locate gemini-cli ---
 if ! command -v npm >/dev/null 2>&1; then
@@ -61,25 +61,25 @@ fi
 
 echo
 
-# --- 5. LLM_SANDBOX_DIR export hint ---------------------------------------
+# --- 5. LLM_SWARM_DIR export hint ---------------------------------------
 # Scripts self-locate via BASH_SOURCE so the runtime path is portable, but
 # users who invoke them from arbitrary directories (or via wrapper scripts)
-# benefit from having LLM_SANDBOX_DIR exported in their shell rc — that way
+# benefit from having LLM_SWARM_DIR exported in their shell rc — that way
 # `coordinator.md` template substitution and `.env` search paths use the
 # right install regardless of how scripts are reached.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LLM_SANDBOX_DIR="$(dirname "$SCRIPT_DIR")"
+LLM_SWARM_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Only print the hint if the user's environment doesn't already match.
-if [ "${LLM_SANDBOX_DIR_ENV:-${LLM_SANDBOX_DIR_ENV_VAR:-}}" != "$LLM_SANDBOX_DIR" ]; then
+if [ "${LLM_SWARM_DIR_ENV:-${LLM_SWARM_DIR_ENV_VAR:-}}" != "$LLM_SWARM_DIR" ]; then
     yellow "Tip: add this to your ~/.bashrc / ~/.zshrc so all callers find this install:"
-    echo "    export LLM_SANDBOX_DIR=\"$LLM_SANDBOX_DIR\""
-    echo "    export PATH=\"\$LLM_SANDBOX_DIR:\$LLM_SANDBOX_DIR/scripts:\$PATH\""
+    echo "    export LLM_SWARM_DIR=\"$LLM_SWARM_DIR\""
+    echo "    export PATH=\"\$LLM_SWARM_DIR:\$LLM_SWARM_DIR/scripts:\$PATH\""
     echo
 fi
 
 # --- 6. Bash completion install hint --------------------------------------
-COMPLETION_FILE="$LLM_SANDBOX_DIR/completions/llm-dev-sandbox.bash"
+COMPLETION_FILE="$LLM_SWARM_DIR/completions/llm-swarm-runner.bash"
 if [ -f "$COMPLETION_FILE" ]; then
     yellow "Tip: enable tab-completion for llm-start.sh / coordinator-watch.sh / provision-worker.sh:"
     echo "    . \"$COMPLETION_FILE\"   # add to ~/.bashrc"

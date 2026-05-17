@@ -17,7 +17,7 @@ if [[ $# -gt 0 ]]; then
     fi
 fi
 
-IMAGE="llm-sandbox:latest"
+IMAGE="llm-swarm-runner:latest"
 
 # Build if image doesn't exist
 if ! docker image inspect "$IMAGE" &>/dev/null; then
@@ -81,12 +81,12 @@ MOUNTS+=( "-v" "$SCRIPT_DIR:$SCRIPT_DIR:ro" )
 
 # Expose the sandbox install path and the docs subtree to the worker as env
 # vars. The sandbox repo is already bind-mounted ro above (same path in
-# container as on host), so $LLM_SANDBOX_DOCS resolves to a real directory
+# container as on host), so $LLM_SWARM_DOCS resolves to a real directory
 # inside the container. Workers use it to locate the reference-docs index
 # (prompts/refs.md) and the docs themselves (e.g. docs/VCS/git-github.md).
 SANDBOX_DOCS_ENV_OPTS=(
-    -e "LLM_SANDBOX_DIR=$SCRIPT_DIR"
-    -e "LLM_SANDBOX_DOCS=$SCRIPT_DIR/docs"
+    -e "LLM_SWARM_DIR=$SCRIPT_DIR"
+    -e "LLM_SWARM_DOCS=$SCRIPT_DIR/docs"
 )
 
 # Allow for additional mounts via environment variable

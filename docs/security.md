@@ -1,6 +1,6 @@
 # Security Considerations
 
-When giving an autonomous AI tool access to your filesystem, security must be a primary concern. This document outlines the security boundaries and risks associated with `llm-dev-sandbox`.
+When giving an autonomous AI tool access to your filesystem, security must be a primary concern. This document outlines the security boundaries and risks associated with `llm-swarm-runner`.
 
 ## Core Security Model
 

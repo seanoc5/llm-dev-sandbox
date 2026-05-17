@@ -26,13 +26,13 @@ set -euo pipefail
 
 # Configuration
 # Self-locate so the sandbox tree works from any clone path (not tied to
-# /opt/work/sysadmin/...). LLM_SANDBOX_DIR overrides if you want to point at
+# /opt/work/sysadmin/...). LLM_SWARM_DIR overrides if you want to point at
 # a different install while running this script from elsewhere.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LLM_SANDBOX_DIR="${LLM_SANDBOX_DIR:-$SCRIPT_DIR}"
+LLM_SWARM_DIR="${LLM_SWARM_DIR:-$SCRIPT_DIR}"
 
 SESSION_NAME="llm-$(basename "$PWD")"
-SYSTEM_PROMPT_FILE="$LLM_SANDBOX_DIR/prompts/coordinator.md"
+SYSTEM_PROMPT_FILE="$LLM_SWARM_DIR/prompts/coordinator.md"
 
 # --- Help / usage ----------------------------------------------------------
 
@@ -101,8 +101,8 @@ EXAMPLES
     ./llm-start.sh "claim Radesh's tickets"     # free-text override
 
 DOCS
-    README:    $LLM_SANDBOX_DIR/README.md
-    Overview:  $LLM_SANDBOX_DIR/docs/llm-dev-sandbox-overview.md
+    README:    $LLM_SWARM_DIR/README.md
+    Overview:  $LLM_SWARM_DIR/docs/llm-swarm-runner-overview.md
 EOF
 }
 
@@ -160,7 +160,7 @@ INITIAL_PROMPT="${1:-Execute the Initial Startup Checklist.}"
 # fills in still-unset vars. Final precedence:
 #   flag > shell env > <project>/.swarm/.env > <sandbox>/.env.example
 # shellcheck source=scripts/_load-env.sh
-. "$LLM_SANDBOX_DIR/scripts/_load-env.sh" "$PWD"
+. "$LLM_SWARM_DIR/scripts/_load-env.sh" "$PWD"
 
 # Allow overriding the coordinator command and model
 COORD_CMD="${COORDINATOR_CMD:-claude}"
@@ -193,7 +193,7 @@ if [ "$COORD_CMD" = "gemini" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
     _env_candidates=(
         "$PWD/.env"
         "$HOME/.gemini/.env"
-        "$LLM_SANDBOX_DIR/.env"
+        "$LLM_SWARM_DIR/.env"
         "/opt/work/sysadmin/.env"
     )
     if [ -n "${LLM_ENV_FILES:-}" ]; then
@@ -300,14 +300,14 @@ if ! $session_existed; then
     # Propagate sandbox config into the session so the coordinator LLM and
     # any provision-worker.sh invocations within the session see the same
     # caps and filters loaded from .env.example / .swarm/.env above.
-    # LLM_SANDBOX_DOCS = $LLM_SANDBOX_DIR/docs by convention; matches the
+    # LLM_SWARM_DOCS = $LLM_SWARM_DIR/docs by convention; matches the
     # env var sandbox.sh sets inside worker containers, so coordinator and
     # workers reference the same path notation.
-    : "${LLM_SANDBOX_DOCS:=$LLM_SANDBOX_DIR/docs}"
-    export LLM_SANDBOX_DOCS
+    : "${LLM_SWARM_DOCS:=$LLM_SWARM_DIR/docs}"
+    export LLM_SWARM_DOCS
     for _v in MAX_WORKERS MAX_TMUX_WINDOWS TARGET_AVAILABLE OWNER_LABELS \
               INCLUDE_ASSIGNED_TO_OTHERS DEBOUNCE_SECS POLL_SECS \
-              LLM_SANDBOX_DIR LLM_SANDBOX_DOCS; do
+              LLM_SWARM_DIR LLM_SWARM_DOCS; do
         _val="${!_v:-}"
         [ -n "$_val" ] && TMUX_ENV_OPTS+=(-e "$_v=$_val")
     done
@@ -354,13 +354,13 @@ if ! $session_existed || ! $window_exists || $coordinator_idle; then
     TMP_PROMPT=$(mktemp)
     echo "$INITIAL_PROMPT" > "$TMP_PROMPT"
 
-    # Render the system prompt with {{LLM_SANDBOX_DIR}} substituted, so the
+    # Render the system prompt with {{LLM_SWARM_DIR}} substituted, so the
     # coordinator's instructions reference the actual install path rather
     # than a hardcoded one. The rendered file is consumed below by
     # GEMINI_SYSTEM_MD / --append-system-prompt; we let it leak into /tmp
     # since it's tiny, deterministic, and the rendered prompt is harmless.
     RENDERED_PROMPT_FILE=$(mktemp -t coordinator-prompt-XXXXXX.md)
-    sed "s|{{LLM_SANDBOX_DIR}}|$LLM_SANDBOX_DIR|g" "$SYSTEM_PROMPT_FILE" > "$RENDERED_PROMPT_FILE"
+    sed "s|{{LLM_SWARM_DIR}}|$LLM_SWARM_DIR|g" "$SYSTEM_PROMPT_FILE" > "$RENDERED_PROMPT_FILE"
 
     # Per-backend launch. Each branch builds the tmux send-keys line tailored
     # to its CLI. The claude branch delegates to scripts/coordinator-claude.sh
@@ -389,7 +389,7 @@ if ! $session_existed || ! $window_exists || $coordinator_idle; then
         [ "${COORDINATOR_HEADLESS:-0}" = "1" ]   && ENV_VARS+="COORDINATOR_HEADLESS=1 "
         [ "${COORDINATOR_USE_API_KEY:-0}" = "1" ] && ENV_VARS+="COORDINATOR_USE_API_KEY=1 "
 
-        WRAPPER="$LLM_SANDBOX_DIR/scripts/coordinator-claude.sh"
+        WRAPPER="$LLM_SWARM_DIR/scripts/coordinator-claude.sh"
         tmux send-keys -t "$SESSION_NAME:coordinator" \
             "${ENV_VARS}exec $(printf '%q' "$WRAPPER") $(printf '%q' "$RENDERED_PROMPT_FILE") $(printf '%q' "$TMP_PROMPT")" C-m
     else
@@ -415,7 +415,7 @@ if ! $session_existed || ! $window_exists || $coordinator_idle; then
         # writing the full payload to /tmp/gemini-*-error-*.json. The tail
         # script surfaces the actual message so users don't have to dig.
         if [ "$COORD_CMD" = "gemini" ]; then
-            ERR_TAIL="; $LLM_SANDBOX_DIR/scripts/coordinator-error-tail.sh"
+            ERR_TAIL="; $LLM_SWARM_DIR/scripts/coordinator-error-tail.sh"
         else
             ERR_TAIL=''
         fi
@@ -445,7 +445,7 @@ fi
 # Idempotent: detects an existing watcher pane via its pane_start_command
 # and skips the split when one is already running.
 if [ "${WATCH:-1}" = "1" ]; then
-    WATCH_SCRIPT="$LLM_SANDBOX_DIR/scripts/coordinator-watch.sh"
+    WATCH_SCRIPT="$LLM_SWARM_DIR/scripts/coordinator-watch.sh"
     if tmux list-panes -t "$SESSION_NAME:util" -F '#{pane_start_command}' 2>/dev/null \
             | grep -qF "$WATCH_SCRIPT"; then
         echo "coordinator-watch pane already running in '$SESSION_NAME:util' — skipping spawn"
@@ -479,7 +479,7 @@ if [ "${STATUS:-0}" = "1" ]; then
     if tmux list-windows -t "$SESSION_NAME" -F '#W' 2>/dev/null | grep -qx 'status'; then
         echo "tmux window '$SESSION_NAME:status' already exists — skipping status spawn"
     else
-        STATUS_SCRIPT="$LLM_SANDBOX_DIR/scripts/gh-status-bar.sh"
+        STATUS_SCRIPT="$LLM_SWARM_DIR/scripts/gh-status-bar.sh"
         STATUS_CMD=""
         for _v in STATUS_INTERVAL STATUS_LENGTH STATUS_FORMAT GH_TIMEOUT; do
             _val="${!_v:-}"
