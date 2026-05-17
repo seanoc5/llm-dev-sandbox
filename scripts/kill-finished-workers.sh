@@ -35,8 +35,16 @@ FLAGS
                             PR-check + idle-min still apply unless overridden.
         --no-pr-check       Skip 'gh pr view fix/issue-N' check (avoid network)
         --merged-only       STRICT: only reap when PR state is MERGED.
-                            Safe combo with --with-worktree — guarantees no
-                            unmerged work is destroyed. Used by the watcher.
+                            Strictest mode — guarantees no unmerged work
+                            is destroyed even on origin.
+        --pr-finalized      Reap when PR state is MERGED *or* CLOSED.
+                            "Finalized" means GitHub considers the PR done
+                            (user merged it, or closed it as
+                            rejected/superseded/duplicate). Local worktree
+                            + branch are removed; the branch on origin is
+                            preserved, so a CLOSED PR remains recoverable
+                            via `gh pr reopen N`. Used by the watcher's
+                            autoclose pass for smoother slot reclamation.
     -i, --idle-min N        Require N+ minutes since last pane activity
                             (default 0 — any parked window is eligible)
     -w, --with-worktree     Also remove git worktree + delete branch
@@ -55,7 +63,8 @@ EXAMPLES
     kill-finished-workers.sh --with-worktree          # parked + worktrees
     kill-finished-workers.sh --all --with-worktree    # full nuke (prompts)
     kill-finished-workers.sh --all --with-worktree -y # full nuke, no prompt
-    kill-finished-workers.sh --merged-only --with-worktree -y  # safe auto-reap
+    kill-finished-workers.sh --merged-only --with-worktree -y     # safe auto-reap
+    kill-finished-workers.sh --pr-finalized --with-worktree -y    # also reap closed-without-merge
 
 EXIT
     0    success (or nothing to do)
@@ -69,6 +78,7 @@ DRY=0
 YES=0
 PR_CHECK=1
 MERGED_ONLY=0
+PR_FINALIZED=0
 IDLE_MIN=0
 SESSION_NAME="${SESSION_NAME:-llm-$(basename "$PWD")}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -91,6 +101,7 @@ while [[ $# -gt 0 ]]; do
         -y|--yes)             YES=1; shift ;;
         --no-pr-check)        PR_CHECK=0; shift ;;
         --merged-only)        MERGED_ONLY=1; shift ;;
+        --pr-finalized)       PR_FINALIZED=1; shift ;;
         -i|--idle-min)        require_value "$1" "${2:-}"; IDLE_MIN="$2"; shift 2 ;;
         --idle-min=*)         IDLE_MIN="${1#*=}"; shift ;;
         -s|--session)         require_value "$1" "${2:-}"; SESSION_NAME="$2"; shift 2 ;;
@@ -103,6 +114,11 @@ done
 # IDLE_MIN must be a non-negative integer
 if ! [[ "$IDLE_MIN" =~ ^[0-9]+$ ]]; then
     echo "ERROR: --idle-min must be a non-negative integer (got: $IDLE_MIN)" >&2
+    exit 1
+fi
+
+if [ "$MERGED_ONLY" = "1" ] && [ "$PR_FINALIZED" = "1" ]; then
+    echo "ERROR: --merged-only and --pr-finalized are mutually exclusive" >&2
     exit 1
 fi
 
@@ -184,6 +200,20 @@ pr_is_merged() {
     [ "$state" = "MERGED" ]
 }
 
+# Returns 0 if the PR for fix/issue-N is finalized — MERGED or CLOSED.
+# Returns 1 for OPEN or no PR at all. Used by --pr-finalized mode so the
+# watcher can also reap PRs the user has rejected/closed without merging
+# (superseded, duplicate, abandoned). Local worktree + branch get removed,
+# but origin/fix/issue-N is preserved by kill-worktree.sh (it only does
+# `git branch -D`, never `git push --delete`), so accidental closures are
+# recoverable via `gh pr reopen N`.
+pr_is_finalized() {
+    local issue="$1"
+    local state
+    state=$(gh pr view "fix/issue-$issue" --json state -q .state 2>/dev/null || true)
+    [ "$state" = "MERGED" ] || [ "$state" = "CLOSED" ]
+}
+
 # Decide which ones to kill ---------------------------------------------------
 KILL_LIST=()
 for w in "${WINDOWS[@]}"; do
@@ -218,6 +248,12 @@ for w in "${WINDOWS[@]}"; do
             continue
         fi
         reasons+=("PR-merged")
+    elif [ "$PR_FINALIZED" = "1" ]; then
+        if ! pr_is_finalized "$issue"; then
+            echo "  $w  [PR fix/issue-$issue not MERGED|CLOSED → skip (pr-finalized mode)]"
+            continue
+        fi
+        reasons+=("PR-finalized")
     elif [ "$PR_CHECK" = "1" ]; then
         if has_open_pr "$issue"; then
             echo "  $w  [PR fix/issue-$issue still OPEN → skip (use --no-pr-check to override)]"
