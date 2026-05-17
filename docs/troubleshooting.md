@@ -1,5 +1,18 @@
 # Troubleshooting
 
+## Quick fixes
+
+| Symptom | Quick fix | Details |
+|---|---|---|
+| `permission denied` on `/var/run/docker.sock` | `sudo usermod -aG docker $USER`, then re-login (or `newgrp docker`) | [↓](#permission-denied-on-varrundockersock) |
+| `gh: HTTP 401` in sandbox | Confirm `gh auth status` works on host; rebuild image if the token isn't propagating | [↓](#gh-http-401) |
+| Worker isn't picking up briefs | Start a listener window: `tmux new-window … sandbox.sh <wt> listener` | [↓](#worker-isnt-picking-up-briefs) |
+| Tasks stuck in `processing/` | `mv <wt>/.swarm/tasks/processing/<id>.md <wt>/.swarm/tasks/inbox/` | [↓](#tasks-stuck-in-processing) |
+| Ctrl-Z suspended claude inside a worker | `docker exec swarm-<session>-iss-N bash -c 'pkill -CONT -f claude'` | [↓](#ctrl-z-accidentally-suspended-claude-inside-a-worker) |
+| `Ripgrep is not available` warning from gemini | Run `./scripts/setup.sh` on the host once | [↓](#ripgrep-fallback-warning-from-gemini) |
+
+---
+
 Common issues and their resolutions. If you hit something not covered here, please open an issue against the repo so we can add it.
 
 > **Tip:** for general tmux usage (attach/detach, multi-client handling, capturing pane scrollback for diagnosis, killing dead panes), see [`tmux-cheatsheet.md`](./tmux-cheatsheet.md). Many of the diagnostic commands referenced below assume familiarity with `tmux capture-pane -p -S -N` and `tmux list-windows`.
