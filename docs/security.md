@@ -1,5 +1,7 @@
 # Security Considerations
 
+> **TL;DR:** Agents are treated as **trusted-but-fallible**, not adversarial. The container limits blast radius from honest mistakes (typos, hallucinated `rm -rf`) but is **not** a security boundary against a hostile/compromised agent — `--network host`, `~/.claude` rw, and Docker-out-of-Docker mean a sufficiently-capable hostile agent can escape. See below for the full risk model.
+
 When giving an autonomous AI tool access to your filesystem, security must be a primary concern. This document outlines the security boundaries and risks associated with `llm-swarm-runner`.
 
 ## Core Security Model
