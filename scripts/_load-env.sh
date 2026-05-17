@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# _load-env.sh — sourceable env loader for llm-dev-sandbox scripts.
+# _load-env.sh — sourceable env loader for llm-swarm-runner scripts.
 #
 # Applies <project>/.swarm/.env then <sandbox>/.env.example to the current
 # shell, leaving already-set variables untouched. Caller-supplied env wins.
 #
 # Usage:
-#   . "$LLM_SANDBOX_DIR/scripts/_load-env.sh" [project-dir]
+#   . "$LLM_SWARM_DIR/scripts/_load-env.sh" [project-dir]
 #
 # Final precedence (highest wins):
 #   1. shell env (anything already exported)
@@ -73,8 +73,8 @@ _expand_extra_mounts() {
 _load_env_main() {
     local proj sandbox
     proj="${1:-$PWD}"
-    # Caller may pre-set LLM_SANDBOX_DIR; otherwise infer from this script's path.
-    sandbox="${LLM_SANDBOX_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+    # Caller may pre-set LLM_SWARM_DIR; otherwise infer from this script's path.
+    sandbox="${LLM_SWARM_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
     _apply_env_file "$proj/.swarm/.env"        # project override
     _apply_env_file "$sandbox/.env.example"    # ship defaults

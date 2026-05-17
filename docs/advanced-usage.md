@@ -106,6 +106,38 @@ EXTRA_MOUNTS="/opt/data:/mnt/data:ro" ./sandbox.sh /path/to/project
 EXTRA_MOUNTS="/opt/data:ro,/opt/models:/models:ro" ./sandbox.sh /path/to/project
 ```
 
+#### Persistent mounts for swarm workers
+
+The form above sets `EXTRA_MOUNTS` for one ad-hoc `sandbox.sh` invocation. For the swarm-coordinator flow — where `provision-worker.sh` spawns containers automatically — declare mounts in `<project>/.swarm/.env` so every worker spawn picks them up:
+
+```bash
+# /opt/work/myproject/.swarm/.env  — gitignored
+EXTRA_MOUNTS=/opt/data/reference:ro,/opt/work/myorg/sibling-repo:ro
+```
+
+`scripts/_load-env.sh` reads this file (precedence: shell env > `<project>/.swarm/.env` > sandbox `.env.example`) and `provision-worker.sh` injects the value as a prefix on the `tmux new-window` command that starts the worker listener, so the listener's `sandbox.sh` sees it. `${FAND_DATA_ROOT}` (and any other env var resolved earlier in the chain) is expanded via envsubst before docker sees the spec — see `scripts/_load-env.sh:55-72`.
+
+**Common pattern: cross-project siblings.** When several related repos live under one org dir (e.g. `/opt/work/myorg/{app,guide,poc}`), give each project's workers read-only access to its siblings so they can cross-reference code, ADRs, and docs:
+
+```bash
+# /opt/work/myorg/app/.swarm/.env
+EXTRA_MOUNTS=/opt/work/myorg/guide:ro,/opt/work/myorg/poc:ro
+```
+
+Use the same host:container path on both sides (the implicit default when you omit the container side) so absolute paths in code resolve identically inside and outside the container.
+
+**Mounts apply only to newly-spawned workers.** In-flight `iss-*` containers were started with whatever `EXTRA_MOUNTS` was set when *they* spawned — they don't see edits to `.swarm/.env` after the fact. To pick up changes: `tmux kill-window -t llm-<project>:iss-N`, then re-provision the issue. Restarting the whole coordinator session (`tmux kill-session -t llm-<project>` then a fresh `llm-start.sh`) is the heavier-hammer equivalent.
+
+**Verify mounts landed.** After a worker spawns, inspect the running container:
+
+```bash
+docker inspect swarm-llm-<project>-iss-<N> \
+    --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' \
+    | grep -v ' -> /home\| -> /var/run'
+```
+
+The non-`/home`-or-docker-socket lines should be exactly the host paths you put in `EXTRA_MOUNTS`. If a path is missing, the propagation broke somewhere between `.swarm/.env` and the `docker run` invocation — check `tmux show-env -t llm-<project> -g EXTRA_MOUNTS` to see what the tmux session has, and `tmux capture-pane -t llm-<project>:iss-<N> -pS -100` to see what the listener invocation looked like.
+
 ## Docker Integrations
 
 ### Testcontainers / Docker CLI
@@ -116,10 +148,10 @@ The host Docker socket (`/var/run/docker.sock`) is mounted automatically when pr
 
 ```bash
 # After Dockerfile changes
-docker build -t llm-sandbox:latest .
+docker build -t llm-swarm-runner:latest .
 
 # Force a full rebuild (no cache)
-docker build --no-cache -t llm-sandbox:latest .
+docker build --no-cache -t llm-swarm-runner:latest .
 ```
 
 ## Worker Escape Hatch (Ctrl-Z drops to shell)
@@ -136,9 +168,10 @@ Three pieces have to line up:
 |---|---|
 | Container is started with a deterministic `--name` | `sandbox.sh` (worker mode) |
 | `provision-worker.sh` uses the format `swarm-<session>-<window>` | `scripts/provision-worker.sh` |
-| Tmux intercepts Ctrl-Z in `iss-*` windows and `docker exec`s into that name | `~/.tmux.conf` (you install this) |
+| Tmux intercepts Ctrl-Z in `iss-*` windows and runs the helper script | `~/.tmux.conf` (you install this) |
+| Helper resolves the session/window names and `docker exec`s in | `scripts/tmux-worker-shell.sh` |
 
-The binding (copy this block into `~/.tmux.conf` — also included in [`examples/tmux.conf.example`](../examples/tmux.conf.example)):
+The binding (copy this block into `~/.tmux.conf` — also included in [`examples/tmux.conf.example`](../examples/tmux.conf.example)). Adjust the absolute path to where you cloned `llm-swarm-runner`:
 
 ```tmux
 # Worker (iss-*) Ctrl-Z escape hatch.
@@ -146,9 +179,11 @@ The binding (copy this block into `~/.tmux.conf` — also included in [`examples
 # into the same worker container as a login shell. claude keeps running.
 # In any other window, Ctrl-Z falls through to normal behavior.
 bind-key -n C-z if-shell -F '#{m:iss-*,#{window_name}}' \
-    'split-window -h "docker exec -it swarm-#{session_name}-#{window_name} bash -l"' \
+    'split-window -h "/opt/work/sysadmin/llm-swarm-runner/scripts/tmux-worker-shell.sh"' \
     'send-keys C-z'
 ```
+
+**Why the helper script?** tmux's `if-shell -F` expands `#{...}` formats in its *condition*, but `split-window`'s shell-command argument is passed **literally** — no format substitution. An earlier version of this binding put `#{session_name}` and `#{window_name}` directly in the `docker exec` line; those reached docker unexpanded as the literal container name `swarm-#{session_name}-#{window_name}`, which never matched a real container, so the new pane died with exit 1 every time. The helper sidesteps the limitation by resolving the names at run time via `tmux display-message -p -t "$TMUX_PANE"` (which *does* expand formats) before exec-ing into docker.
 
 After editing the config, reload it into the running tmux server (no restart required):
 
@@ -183,6 +218,8 @@ See also: [Troubleshooting → Ctrl-Z accidentally suspended claude](./troublesh
 
 ## Triage Workflow
 
+> **Tip:** the triage cycle ends with you merging the READY PRs — which routinely means resolving conflicts because main moved while workers ran. [`VCS/git-github.md`](./VCS/git-github.md) is a focused crib sheet for that step, especially the "resolving conflicts in a PR" section.
+
 A pattern that recurs whenever a swarm of workers has been running for a while: their tmux session dies (reboot, accidental kill, ssh hang-up), but their worktrees + branches + queue state survive on disk. You come back to N abandoned worktrees and need to decide, per worktree, whether to merge / abandon / continue.
 
 The four-tool kit is built for exactly this:
@@ -207,7 +244,7 @@ Use `COORDINATOR_CMD=claude` for this — claude streams tool calls cleanly to t
 
 ```bash
 cd /opt/work/myproject
-COORDINATOR_CMD=claude $LLM_SANDBOX_DIR/llm-start.sh "$(cat <<'EOF'
+COORDINATOR_CMD=claude $LLM_SWARM_DIR/llm-start.sh "$(cat <<'EOF'
 Triage the existing worker worktrees. READ-ONLY — do NOT push, do NOT
 open PRs, do NOT merge, do NOT close issues, do NOT remove worktrees,
 do NOT provision new workers.
@@ -264,7 +301,7 @@ If the coordinator's READY list is short, do them by hand. If it's long, you can
 The worker's branch contains a mix of valuable new work AND stale changes that conflict with master (because master moved while the worker ran). Drop a brief telling a fresh worker to reset and re-apply only the salvageable parts:
 
 ```bash
-cat <<'BRIEF' | $LLM_SANDBOX_DIR/scripts/requeue.sh N -
+cat <<'BRIEF' | $LLM_SWARM_DIR/scripts/requeue.sh N -
 ## Surgical re-do for issue #N
 
 Your earlier work added <X valuable thing> AND a rewrite of <Y> that
@@ -292,7 +329,7 @@ BRIEF
 Same shape as NEEDS_REVIEW, but the brief just enumerates the remaining scope:
 
 ```bash
-cat <<'BRIEF' | $LLM_SANDBOX_DIR/scripts/requeue.sh N -
+cat <<'BRIEF' | $LLM_SWARM_DIR/scripts/requeue.sh N -
 ## Follow-up to your prior work on issue #N
 
 You completed <subset>. The issue scope was <full set> — <remainder> remains:
@@ -310,11 +347,11 @@ BRIEF
 
 ```bash
 # single
-$LLM_SANDBOX_DIR/scripts/kill-worktree.sh N
+$LLM_SWARM_DIR/scripts/kill-worktree.sh N
 
 # batch
 for issue in <list>; do
-    $LLM_SANDBOX_DIR/scripts/kill-worktree.sh "$issue"
+    $LLM_SWARM_DIR/scripts/kill-worktree.sh "$issue"
 done
 ```
 
@@ -329,7 +366,7 @@ cd /opt/work/myproject
 
 # 1. Recreate the session if needed (status-only prompt — read-only)
 tmux has-session -t "llm-$(basename $PWD)" 2>/dev/null || \
-    NON_INTERACTIVE=1 $LLM_SANDBOX_DIR/llm-start.sh \
+    NON_INTERACTIVE=1 $LLM_SWARM_DIR/llm-start.sh \
         "Status check ONLY — list worktrees and recent outcomes."
 
 # 2. Spawn a listener window per worktree you'll act on
@@ -339,7 +376,7 @@ for issue in <list>; do
     SESSION="llm-$(basename $PWD)"
     tmux list-windows -t "$SESSION" -F '#W' 2>/dev/null | grep -qx "iss-$issue" || \
         tmux new-window -d -t "$SESSION" -n "iss-$issue" \
-            "$LLM_SANDBOX_DIR/sandbox.sh $WT listener"
+            "$LLM_SWARM_DIR/sandbox.sh $WT listener"
 done
 
 # 3. Verify

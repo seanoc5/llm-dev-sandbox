@@ -26,13 +26,13 @@ set -euo pipefail
 
 # Configuration
 # Self-locate so the sandbox tree works from any clone path (not tied to
-# /opt/work/sysadmin/...). LLM_SANDBOX_DIR overrides if you want to point at
+# /opt/work/sysadmin/...). LLM_SWARM_DIR overrides if you want to point at
 # a different install while running this script from elsewhere.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LLM_SANDBOX_DIR="${LLM_SANDBOX_DIR:-$SCRIPT_DIR}"
+LLM_SWARM_DIR="${LLM_SWARM_DIR:-$SCRIPT_DIR}"
 
 SESSION_NAME="llm-$(basename "$PWD")"
-SYSTEM_PROMPT_FILE="$LLM_SANDBOX_DIR/prompts/coordinator.md"
+SYSTEM_PROMPT_FILE="$LLM_SWARM_DIR/prompts/coordinator.md"
 
 # --- Help / usage ----------------------------------------------------------
 
@@ -71,6 +71,7 @@ ENV VARS  (precedence: flag > shell env > <project>/.swarm/.env > <sandbox>/.env
     COORDINATOR_CMD              claude    claude | gemini
     COORDINATOR_MODEL            (varies)  per-coordinator default
     COORDINATOR_VERBOSE          0         gemini -i instead of -p
+    COORDINATOR_HEADLESS         0         1 = claude -p (exits after each prompt)
     COORDINATOR_USE_API_KEY      0         keep ANTHROPIC_API_KEY (bills API)
 
   Caps & filters  [also loadable from <project>/.swarm/.env]
@@ -100,8 +101,8 @@ EXAMPLES
     ./llm-start.sh "claim Radesh's tickets"     # free-text override
 
 DOCS
-    README:    $LLM_SANDBOX_DIR/README.md
-    Overview:  $LLM_SANDBOX_DIR/docs/llm-dev-sandbox-overview.md
+    README:    $LLM_SWARM_DIR/README.md
+    Overview:  $LLM_SWARM_DIR/docs/llm-swarm-runner-overview.md
 EOF
 }
 
@@ -159,7 +160,7 @@ INITIAL_PROMPT="${1:-Execute the Initial Startup Checklist.}"
 # fills in still-unset vars. Final precedence:
 #   flag > shell env > <project>/.swarm/.env > <sandbox>/.env.example
 # shellcheck source=scripts/_load-env.sh
-. "$LLM_SANDBOX_DIR/scripts/_load-env.sh" "$PWD"
+. "$LLM_SWARM_DIR/scripts/_load-env.sh" "$PWD"
 
 # Allow overriding the coordinator command and model
 COORD_CMD="${COORDINATOR_CMD:-claude}"
@@ -192,7 +193,7 @@ if [ "$COORD_CMD" = "gemini" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
     _env_candidates=(
         "$PWD/.env"
         "$HOME/.gemini/.env"
-        "$LLM_SANDBOX_DIR/.env"
+        "$LLM_SWARM_DIR/.env"
         "/opt/work/sysadmin/.env"
     )
     if [ -n "${LLM_ENV_FILES:-}" ]; then
@@ -236,14 +237,37 @@ fi
 #   • session, busy pane      → don't disturb; just attach so user can watch
 session_existed=false
 coordinator_idle=true
+window_exists=true   # vacuously true when no session — gated by session_existed
 PANE_CMD=""
+PANE_DEAD=0
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
     session_existed=true
-    PANE_CMD=$(tmux list-panes -t "$SESSION_NAME:coordinator" -F "#{pane_current_command}" 2>/dev/null | head -1)
-    case "$PANE_CMD" in
-        bash|zsh|sh|fish|"") coordinator_idle=true ;;
-        *)                   coordinator_idle=false ;;
-    esac
+    if tmux list-windows -t "$SESSION_NAME" -F '#W' 2>/dev/null | grep -qx 'coordinator'; then
+        # eval-safe: format string is fixed, values are constrained by tmux
+        # (pane_current_command is an executable name; pane_dead is 0 or 1).
+        eval "$(tmux list-panes -t "$SESSION_NAME:coordinator" \
+                 -F 'PANE_CMD=#{pane_current_command} PANE_DEAD=#{pane_dead}' \
+                 2>/dev/null | head -1)"
+        if [ "${PANE_DEAD:-0}" = "1" ]; then
+            # remain-on-exit=failed left a dead pane after a non-zero exit.
+            # Kill it; the window auto-closes when its last pane is gone,
+            # collapsing this into the window_exists=false case below.
+            tmux kill-pane -t "$SESSION_NAME:coordinator" 2>/dev/null || true
+            window_exists=false
+            coordinator_idle=true
+            echo "Detected dead coordinator pane (previous crash); cleared. Will relaunch."
+        else
+            case "$PANE_CMD" in
+                bash|zsh|sh|fish|"") coordinator_idle=true ;;
+                *)                   coordinator_idle=false ;;
+            esac
+        fi
+    else
+        # Session survives but coordinator window is gone — clean exit
+        # closed it under remain-on-exit=failed. Recreate the window.
+        window_exists=false
+        coordinator_idle=true
+    fi
 fi
 
 if ! $session_existed; then
@@ -267,12 +291,23 @@ if ! $session_existed; then
     if [ -n "${WORKER_HEADLESS:-}" ]; then
         TMUX_ENV_OPTS+=(-e "WORKER_HEADLESS=$WORKER_HEADLESS")
     fi
+    # Propagate COORDINATOR_HEADLESS so child invocations of llm-start.sh
+    # inside the session (e.g. provision-worker, watch-driven re-wakes) see
+    # the same value. Default (unset) = interactive REPL coordinator.
+    if [ -n "${COORDINATOR_HEADLESS:-}" ]; then
+        TMUX_ENV_OPTS+=(-e "COORDINATOR_HEADLESS=$COORDINATOR_HEADLESS")
+    fi
     # Propagate sandbox config into the session so the coordinator LLM and
     # any provision-worker.sh invocations within the session see the same
     # caps and filters loaded from .env.example / .swarm/.env above.
+    # LLM_SWARM_DOCS = $LLM_SWARM_DIR/docs by convention; matches the
+    # env var sandbox.sh sets inside worker containers, so coordinator and
+    # workers reference the same path notation.
+    : "${LLM_SWARM_DOCS:=$LLM_SWARM_DIR/docs}"
+    export LLM_SWARM_DOCS
     for _v in MAX_WORKERS MAX_TMUX_WINDOWS TARGET_AVAILABLE OWNER_LABELS \
               INCLUDE_ASSIGNED_TO_OTHERS DEBOUNCE_SECS POLL_SECS \
-              LLM_SANDBOX_DIR; do
+              LLM_SWARM_DIR LLM_SWARM_DOCS; do
         _val="${!_v:-}"
         [ -n "$_val" ] && TMUX_ENV_OPTS+=(-e "$_v=$_val")
     done
@@ -281,97 +316,140 @@ if ! $session_existed; then
         echo "Loaded GEMINI_API_KEY from $GEMINI_ENV_SOURCED"
     fi
     tmux new-session -d -s "$SESSION_NAME" "${TMUX_ENV_OPTS[@]}" -n "coordinator"
+elif ! $window_exists; then
+    echo "Session $SESSION_NAME exists but coordinator window is gone. Recreating window."
+    tmux new-window -d -t "$SESSION_NAME" -n coordinator
 elif $coordinator_idle; then
     echo "Session $SESSION_NAME exists; coordinator pane is idle (previous agent exited). Sending new prompt to existing window."
+elif [ "$COORD_CMD" = "claude" ] && [ "${COORDINATOR_HEADLESS:-0}" != "1" ]; then
+    # Interactive claude REPL is the new default. When the pane is busy
+    # running something (PANE_CMD != shell), assume it's the live coordinator
+    # REPL and paste the new prompt into it as a follow-up message instead
+    # of relaunching claude. This is what kills the "coordinator amnesia"
+    # symptom — prior turns stay in-context across `llm "..."` invocations.
+    echo "Session $SESSION_NAME exists; coordinator REPL is live (pane: '$PANE_CMD'). Sending prompt into the running session."
 else
     echo "Session $SESSION_NAME exists; coordinator is busy (running '$PANE_CMD'). Not interrupting — attaching."
 fi
 
-# Only build + send a launch command when we have an idle pane to send into.
-# (Skipped when an agent is already running in the existing session.)
-if ! $session_existed || $coordinator_idle; then
+# Ensure the 'util' window exists immediately after coordinator (slot 2).
+# Bare bash in $PWD — no sandbox, no container — for ad-hoc inspection
+# commands while the coordinator and workers run. When WATCH=1 (below),
+# coordinator-watch.sh is added as a second pane in this window instead
+# of taking its own window slot, which saves a window and puts the
+# watcher next to a live shell you can use to react to its output.
+if ! tmux list-windows -t "$SESSION_NAME" -F '#W' 2>/dev/null | grep -qx 'util'; then
+    # -a -t coordinator inserts after the coordinator window. tmux shifts
+    # any existing windows at that index up to make room, so util ends up
+    # at slot 2 (right after coordinator at slot 1).
+    tmux new-window -d -a -t "$SESSION_NAME:coordinator" -n util -c "$PWD"
+    echo "Created util window (bare bash in $PWD)."
+fi
+
+# Only build + send a launch command when we have an idle/empty pane to
+# send into. (Skipped when an agent is already running in the existing
+# session — that case is handled by the live-REPL reprompt elif below.)
+if ! $session_existed || ! $window_exists || $coordinator_idle; then
     # We pass the prompt via a temporary file to handle multiline strings safely
     TMP_PROMPT=$(mktemp)
     echo "$INITIAL_PROMPT" > "$TMP_PROMPT"
 
-    # Render the system prompt with {{LLM_SANDBOX_DIR}} substituted, so the
+    # Render the system prompt with {{LLM_SWARM_DIR}} substituted, so the
     # coordinator's instructions reference the actual install path rather
     # than a hardcoded one. The rendered file is consumed below by
     # GEMINI_SYSTEM_MD / --append-system-prompt; we let it leak into /tmp
     # since it's tiny, deterministic, and the rendered prompt is harmless.
     RENDERED_PROMPT_FILE=$(mktemp -t coordinator-prompt-XXXXXX.md)
-    sed "s|{{LLM_SANDBOX_DIR}}|$LLM_SANDBOX_DIR|g" "$SYSTEM_PROMPT_FILE" > "$RENDERED_PROMPT_FILE"
+    sed "s|{{LLM_SWARM_DIR}}|$LLM_SWARM_DIR|g" "$SYSTEM_PROMPT_FILE" > "$RENDERED_PROMPT_FILE"
 
-    # Construct the base command
-    if [ "$COORD_CMD" = "gemini" ]; then
-        BASE_CMD="GEMINI_SYSTEM_MD='$RENDERED_PROMPT_FILE' gemini -m '$COORD_MODEL' --yolo --skip-trust"
-    elif [ "$COORD_CMD" = "claude" ]; then
-        # Claude Max users authenticate via OAuth stored in ~/.claude/. If
-        # ANTHROPIC_API_KEY is set, claude-code prefers it over the OAuth
-        # session and silently bills the API account. Strip it so Max is used.
-        if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-            echo "WARN: ANTHROPIC_API_KEY is set; stripping it from coordinator env so Claude Max OAuth is used."
+    # Per-backend launch. Each branch builds the tmux send-keys line tailored
+    # to its CLI. The claude branch delegates to scripts/coordinator-claude.sh
+    # so the visible pane line stays short and the long flag soup lives in
+    # one maintainable place. The gemini path remains inline (already short).
+    if [ "$COORD_CMD" = "claude" ]; then
+        # Host-side announce. The wrapper does the actual stripping/toggling,
+        # but flagging the ANTHROPIC_API_KEY case here keeps the warning
+        # visible to the user launching llm-start.sh (it would otherwise
+        # only surface inside the tmux pane).
+        if [ -n "${ANTHROPIC_API_KEY:-}" ] && [ "${COORDINATOR_USE_API_KEY:-0}" != "1" ]; then
+            echo "WARN: ANTHROPIC_API_KEY is set; coordinator-claude.sh will strip it so Claude Max OAuth is used."
             echo "      (Set COORDINATOR_USE_API_KEY=1 to keep it and bill the API account instead.)"
         fi
-        if [ "${COORDINATOR_USE_API_KEY:-0}" = "1" ]; then
-            ENV_PREFIX=""
-        else
-            ENV_PREFIX="env -u ANTHROPIC_API_KEY "
+        if [ "${COORDINATOR_HEADLESS:-0}" != "1" ]; then
+            echo "Coordinator: claude interactive REPL (set COORDINATOR_HEADLESS=1 for -p / exit-after-prompt)."
+            echo "  • First run per project triggers claude's 'Trust this folder?' dialog — answer Y."
+            echo "  • Conversation grows per turn; restart the pane or /compact when it bloats."
         fi
-        # --append-system-prompt is claude-code's equivalent of GEMINI_SYSTEM_MD.
-        # --dangerously-skip-permissions matches gemini --yolo for autonomous ops.
-        # --model only when COORD_MODEL is set. The single quotes around
-        # $COORD_MODEL are literal characters embedded in BASE_CMD — needed
-        # so the default 'claude-opus-4-7[1m]' (which contains bash glob
-        # chars [ and ]) survives shell parsing when BASE_CMD is executed.
-        # shellcheck disable=SC2016  # $COORD_MODEL is in double-quoted context, so it does expand
-        BASE_CMD="${ENV_PREFIX}claude ${COORD_MODEL:+--model '$COORD_MODEL'} --append-system-prompt \"\$(cat '$RENDERED_PROMPT_FILE')\" --dangerously-skip-permissions"
-    else
-        BASE_CMD="$COORD_CMD"
-    fi
 
-    # Default: -p (headless print mode). Both gemini and claude run the prompt
-    # and exit. claude's -p prints tool calls as it works (verbose by default);
-    # gemini's -p prints only the final answer (silent during work).
-    #
-    # COORDINATOR_VERBOSE=1 swaps gemini's -p for -i (--prompt-interactive)
-    # so you can attach to the pane and watch tool calls live. Trade-off: the
-    # gemini agent stays alive after the prompt completes — exit it manually
-    # with /quit or Ctrl-D when satisfied. claude is unaffected since its -p
-    # is already verbose.
-    if [ "$COORD_CMD" = "gemini" ] && [ "${COORDINATOR_VERBOSE:-1}" = "1" ]; then
-        PROMPT_FLAG="-i"
-        echo "COORDINATOR_VERBOSE=1: gemini will stay interactive after the prompt; exit with /quit."
-    else
-        PROMPT_FLAG="-p"
-    fi
+        # Env-prefix for vars the wrapper reads. printf %q quotes safely so
+        # shell glob chars in the model id (e.g. 'claude-opus-4-7[1m]') and
+        # any spaces in tmp paths survive the tmux→bash re-parse.
+        ENV_VARS=""
+        [ -n "${COORD_MODEL:-}" ]                && ENV_VARS+="COORD_MODEL=$(printf '%q' "$COORD_MODEL") "
+        [ "${COORDINATOR_HEADLESS:-0}" = "1" ]   && ENV_VARS+="COORDINATOR_HEADLESS=1 "
+        [ "${COORDINATOR_USE_API_KEY:-0}" = "1" ] && ENV_VARS+="COORDINATOR_USE_API_KEY=1 "
 
-    # Append a trailing call to coordinator-error-tail.sh for the gemini path.
-    # gemini-cli truncates server-side errors (e.g. INVALID_ARGUMENT on
-    # gemini-3-flash-preview) to "Operation cancelled" in the pane while
-    # writing the full payload to /tmp/gemini-*-error-*.json. The tail script
-    # surfaces the actual message so users don't have to dig in /tmp.
-    # No-op for claude — its -p mode prints tool calls and errors directly.
-    if [ "$COORD_CMD" = "gemini" ]; then
-        ERR_TAIL="; $LLM_SANDBOX_DIR/scripts/coordinator-error-tail.sh"
+        WRAPPER="$LLM_SWARM_DIR/scripts/coordinator-claude.sh"
+        tmux send-keys -t "$SESSION_NAME:coordinator" \
+            "${ENV_VARS}exec $(printf '%q' "$WRAPPER") $(printf '%q' "$RENDERED_PROMPT_FILE") $(printf '%q' "$TMP_PROMPT")" C-m
     else
-        ERR_TAIL=''
-    fi
+        # gemini (or any other backend): inline construction, unchanged.
+        if [ "$COORD_CMD" = "gemini" ]; then
+            BASE_CMD="GEMINI_SYSTEM_MD='$RENDERED_PROMPT_FILE' gemini -m '$COORD_MODEL' --yolo --skip-trust"
+        else
+            BASE_CMD="$COORD_CMD"
+        fi
 
-    tmux send-keys -t "$SESSION_NAME:coordinator" "$BASE_CMD $PROMPT_FLAG \"\$(cat '$TMP_PROMPT')\"; rm '$TMP_PROMPT'$ERR_TAIL" C-m
+        # COORDINATOR_VERBOSE=1 swaps gemini's -p for -i (--prompt-interactive)
+        # so tool calls stream live in the pane. Trade-off: gemini stays alive
+        # after the prompt; exit with /quit or Ctrl-D.
+        if [ "$COORD_CMD" = "gemini" ] && [ "${COORDINATOR_VERBOSE:-1}" = "1" ]; then
+            PROMPT_FLAG="-i"
+            echo "COORDINATOR_VERBOSE=1: gemini will stay interactive after the prompt; exit with /quit."
+        else
+            PROMPT_FLAG="-p"
+        fi
+
+        # gemini-cli truncates server-side errors (e.g. INVALID_ARGUMENT on
+        # gemini-3-flash-preview) to "Operation cancelled" in the pane while
+        # writing the full payload to /tmp/gemini-*-error-*.json. The tail
+        # script surfaces the actual message so users don't have to dig.
+        if [ "$COORD_CMD" = "gemini" ]; then
+            ERR_TAIL="; $LLM_SWARM_DIR/scripts/coordinator-error-tail.sh"
+        else
+            ERR_TAIL=''
+        fi
+
+        tmux send-keys -t "$SESSION_NAME:coordinator" "$BASE_CMD $PROMPT_FLAG \"\$(cat '$TMP_PROMPT')\"; rm '$TMP_PROMPT'$ERR_TAIL" C-m
+    fi
+elif [ "$COORD_CMD" = "claude" ] && [ "${COORDINATOR_HEADLESS:-0}" != "1" ]; then
+    # Live-REPL re-prompt path: claude is already running in the pane and
+    # we want to send a follow-up message into the existing conversation.
+    # tmux load-buffer + paste-buffer handles multi-line content correctly
+    # (bracketed-paste support in modern terminals), then we press Enter
+    # to submit it to claude's input prompt.
+    TMP_PROMPT=$(mktemp)
+    printf '%s\n' "$INITIAL_PROMPT" > "$TMP_PROMPT"
+    tmux load-buffer -b llm-coord-reprompt "$TMP_PROMPT"
+    tmux paste-buffer -b llm-coord-reprompt -t "$SESSION_NAME:coordinator" -d
+    tmux send-keys -t "$SESSION_NAME:coordinator" Enter
+    rm -f "$TMP_PROMPT"
 fi
 
-# Optionally spawn coordinator-watch.sh in its own tmux window so the
-# unattended supervisor pattern is one command instead of two terminals.
+# Optionally spawn coordinator-watch.sh as a second pane inside the util
+# window (alongside the bare bash from the ensure-block above). The
+# unattended supervisor pattern stays one command instead of two terminals.
 # WATCH=1 enables; POST_OUTCOMES + OUTCOME_HOOK propagate from caller env
 # (so `WATCH=1 POST_OUTCOMES=1 OUTCOME_HOOK=/path ./llm-start.sh` gives
 # you coordinator + watcher + audit posting from a single invocation).
-# Idempotent: skips if a 'watch' window already exists in the session.
+# Idempotent: detects an existing watcher pane via its pane_start_command
+# and skips the split when one is already running.
 if [ "${WATCH:-1}" = "1" ]; then
-    if tmux list-windows -t "$SESSION_NAME" -F '#W' 2>/dev/null | grep -qx 'watch'; then
-        echo "tmux window '$SESSION_NAME:watch' already exists — skipping watch spawn"
+    WATCH_SCRIPT="$LLM_SWARM_DIR/scripts/coordinator-watch.sh"
+    if tmux list-panes -t "$SESSION_NAME:util" -F '#{pane_start_command}' 2>/dev/null \
+            | grep -qF "$WATCH_SCRIPT"; then
+        echo "coordinator-watch pane already running in '$SESSION_NAME:util' — skipping spawn"
     else
-        WATCH_SCRIPT="$LLM_SANDBOX_DIR/scripts/coordinator-watch.sh"
         # printf %q makes every value safe for re-parsing in the new shell,
         # which matters for OUTCOME_HOOK paths and prompts that may contain
         # spaces or quotes.
@@ -381,8 +459,11 @@ if [ "${WATCH:-1}" = "1" ]; then
             [ -n "$_val" ] && WATCH_CMD+="$_v=$(printf '%q' "$_val") "
         done
         WATCH_CMD+="$WATCH_SCRIPT $(printf '%q' "$PWD")"
-        tmux new-window -d -t "$SESSION_NAME" -n watch "$WATCH_CMD"
-        echo "Spawned coordinator-watch in tmux window '$SESSION_NAME:watch'"
+        # -v -b splits above (watcher on top, bash on bottom). -c $PWD makes
+        # both panes share a cwd. tmux uses the util window's first pane
+        # as the split source automatically when -t targets a window.
+        tmux split-window -d -v -b -t "$SESSION_NAME:util" -c "$PWD" "$WATCH_CMD"
+        echo "Spawned coordinator-watch as a pane in '$SESSION_NAME:util'"
         if [ "${POST_OUTCOMES:-0}" = "1" ] && [ -z "${OUTCOME_HOOK:-}" ]; then
             echo "  WARN: POST_OUTCOMES=1 but no OUTCOME_HOOK set — sweep will use dry-run stub (no real posts)"
         fi
@@ -398,7 +479,7 @@ if [ "${STATUS:-0}" = "1" ]; then
     if tmux list-windows -t "$SESSION_NAME" -F '#W' 2>/dev/null | grep -qx 'status'; then
         echo "tmux window '$SESSION_NAME:status' already exists — skipping status spawn"
     else
-        STATUS_SCRIPT="$LLM_SANDBOX_DIR/scripts/gh-status-bar.sh"
+        STATUS_SCRIPT="$LLM_SWARM_DIR/scripts/gh-status-bar.sh"
         STATUS_CMD=""
         for _v in STATUS_INTERVAL STATUS_LENGTH STATUS_FORMAT GH_TIMEOUT; do
             _val="${!_v:-}"

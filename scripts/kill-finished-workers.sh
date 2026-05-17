@@ -67,8 +67,8 @@ PR_CHECK=1
 IDLE_MIN=0
 SESSION_NAME="${SESSION_NAME:-llm-$(basename "$PWD")}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LLM_SANDBOX_DIR="${LLM_SANDBOX_DIR:-$(dirname "$SCRIPT_DIR")}"
-KILL_WT="$LLM_SANDBOX_DIR/scripts/kill-worktree.sh"
+LLM_SWARM_DIR="${LLM_SWARM_DIR:-$(dirname "$SCRIPT_DIR")}"
+KILL_WT="$LLM_SWARM_DIR/scripts/kill-worktree.sh"
 
 require_value() {
     if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then

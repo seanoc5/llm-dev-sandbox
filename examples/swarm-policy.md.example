@@ -1,7 +1,7 @@
 # .swarm-policy.md.example
 #
 # Copy this to the ROOT of a project as `.swarm-policy.md` to give the
-# llm-dev-sandbox coordinator a per-project rules-of-engagement file.
+# llm-swarm-runner coordinator a per-project rules-of-engagement file.
 # The coordinator reads it on every wake (Initial Startup Checklist step 1)
 # and embeds it verbatim into every worker brief under a
 # "## Project Guardrails (MUST OBEY)" header.
@@ -22,7 +22,7 @@
 ---
 
 ## Pull-request rules
-- Workers may **only push branches**; never `merge`, `gh pr merge`, `git push origin master`, or anything that lands code on the default branch.
+- Workers are meant to **only push branches**; never `merge`, `gh pr merge`, `git push origin master`, or anything that lands code on the default branch unless explicitly approved by the project lead.
 - PR titles must start with `[swarm]` so they're easy to filter in the UI.
 - PR bodies must include the issue number being closed (`Closes #N`).
 - Do not approve your own PR. Leave PRs in OPEN state for human review.

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted.
 - **Date:** 2026-05-13.
-- **Deciders:** llm-dev-sandbox maintainers.
+- **Deciders:** llm-swarm-runner maintainers.
 
 ## Context
 

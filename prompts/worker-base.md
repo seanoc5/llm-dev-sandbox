@@ -1,6 +1,6 @@
 # Worker Communication Conventions (MUST FOLLOW)
 
-You are a worker spawned by the llm-dev-sandbox coordinator. These conventions
+You are a worker spawned by the llm-swarm-runner coordinator. These conventions
 apply to every task you execute, regardless of project. The per-project
 `.swarm-policy.md` (rendered below this section in your brief) may add or
 override rules — when conflict exists, project policy wins.

@@ -53,12 +53,12 @@ check_script() {
 
 # Self-locate so the test runs from any clone path.
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LLM_SANDBOX_DIR="${LLM_SANDBOX_DIR:-$(dirname "$TESTS_DIR")}"
+LLM_SWARM_DIR="${LLM_SWARM_DIR:-$(dirname "$TESTS_DIR")}"
 
 echo "=== Script Sanity Checks ==="
-check_script "$LLM_SANDBOX_DIR/llm-start.sh"
-check_script "$LLM_SANDBOX_DIR/sandbox.sh"
-check_script "$LLM_SANDBOX_DIR/scripts/worker-listener.sh"
+check_script "$LLM_SWARM_DIR/llm-start.sh"
+check_script "$LLM_SWARM_DIR/sandbox.sh"
+check_script "$LLM_SWARM_DIR/scripts/worker-listener.sh"
 
 echo ""
 echo "Summary: $PASS passed, $FAIL failed."

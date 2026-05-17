@@ -79,7 +79,7 @@ Free tier and AI Pro plans both hit `generativelanguage.googleapis.com`. Symptom
 Check usage at https://aistudio.google.com/app/apikey (per-key) or https://console.cloud.google.com/apis/api/generativelanguage.googleapis.com/quotas (project-wide). The `coordinator-error-tail.sh` helper decodes recent error files:
 
 ```bash
-$LLM_SANDBOX_DIR/scripts/coordinator-error-tail.sh
+$LLM_SWARM_DIR/scripts/coordinator-error-tail.sh
 ```
 
 ### Gemini API key — get / validate
@@ -92,7 +92,7 @@ $LLM_SANDBOX_DIR/scripts/coordinator-error-tail.sh
   ```
   A model name means the key works. `400 API_KEY_INVALID` = bad key; `403 PERMISSION_DENIED` = key disabled or restricted.
 
-`llm-start.sh` searches for `GEMINI_API_KEY` in (in order): the project `.env`, `~/.gemini/.env`, `$LLM_SANDBOX_DIR/.env`, `/opt/work/sysadmin/.env`, then any paths supplied via `LLM_ENV_FILES=path1:path2:...`.
+`llm-start.sh` searches for `GEMINI_API_KEY` in (in order): the project `.env`, `~/.gemini/.env`, `$LLM_SWARM_DIR/.env`, `/opt/work/sysadmin/.env`, then any paths supplied via `LLM_ENV_FILES=path1:path2:...`.
 
 ### Coordinator picks the wrong billing path
 
@@ -136,7 +136,7 @@ Inside the sandbox, `entrypoint.sh` re-aligns the in-container docker group to t
 
 Harmless warning on first start — `entrypoint.sh` suppresses it by registering the docker group. If it persists, rebuild the image:
 ```bash
-docker build -t llm-sandbox:latest .
+docker build -t llm-swarm-runner:latest .
 ```
 
 ### Image build fails / out of date
@@ -144,7 +144,7 @@ docker build -t llm-sandbox:latest .
 The Dockerfile pins specific versions of node, claude-code, gemini-cli, codex, promptfoo, deno, and uv via `ARG`. If a build fails because a pinned version was yanked from npm/PyPI, bump the relevant `ARG` at the top of the Dockerfile and rebuild:
 
 ```bash
-docker build --no-cache -t llm-sandbox:latest .
+docker build --no-cache -t llm-swarm-runner:latest .
 ```
 
 After a clean rebuild, also re-run `./scripts/setup.sh` on the host (the gemini ripgrep symlink lives in the host npm cache, not the image).
@@ -181,6 +181,8 @@ ss -tlnp | grep <port>
 
 ## Git & SSH
 
+> **Tip:** for general git skills relevant to swarm work — resolving merge conflicts in worker PRs, recovery recipes, when to merge vs. rebase — see [`VCS/git-github.md`](./VCS/git-github.md). The entries below are about plumbing failures (signing, mounts, auth); the VCS doc is about *using* git well.
+
 ### `git commit` fails with signing error
 Verify `~/.ssh/id_rsa.pub` (or whatever `user.signingkey` points to) exists on the host. The path must be the literal value in `.gitconfig` — the container mounts `~/.ssh` at that exact path.
 
@@ -215,7 +217,7 @@ Most common cause: no listener tmux window. `requeue.sh` warns about this — re
 
 ```bash
 tmux new-window -d -t llm-<projbase> -n iss-N \
-    "$LLM_SANDBOX_DIR/sandbox.sh /path/to/worktree listener"
+    "$LLM_SWARM_DIR/sandbox.sh /path/to/worktree listener"
 ```
 
 Other causes:

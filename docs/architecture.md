@@ -1,6 +1,6 @@
 # Architecture & Orchestration
 
-This document outlines the design philosophy and technical architecture of the `llm-dev-sandbox` multi-agent system.
+This document outlines the design philosophy and technical architecture of the `llm-swarm-runner` multi-agent system.
 
 ## The 2026 Pattern: Git Worktree Isolation
 

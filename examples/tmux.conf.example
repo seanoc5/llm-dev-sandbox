@@ -1,4 +1,4 @@
-# tmux.conf.example — starter config tuned for the llm-dev-sandbox swarm workflow
+# tmux.conf.example — starter config tuned for the llm-swarm-runner swarm workflow
 #
 # Copy to your home dir and reload:
 #     cp examples/tmux.conf.example ~/.tmux.conf
@@ -30,9 +30,13 @@ set -sg escape-time 10
 set -g base-index 1
 setw -g pane-base-index 1
 
-# Renumber windows after one is closed, so killing iss-215 doesn't leave
-# a gap at index 3. Useful when you bulk-close finished workers.
-set -g renumber-windows on
+# Keep window slot numbers stable when a window closes — leave a gap rather
+# than sliding higher-numbered windows down. In the swarm workflow, workers
+# named iss-N live at specific slots; renumbering churns the slot/issue
+# mapping and breaks muscle memory like "slot 7 = iss-5". The downside is a
+# sparse status bar after a bunch of workers exit — flip this back to `on`
+# if you bulk-close finished workers and prefer compact numbering.
+set -g renumber-windows off
 
 # Show window activity (a `*` next to a window in the status bar when
 # something printed there since you last looked). Helpful for tracking
@@ -97,6 +101,58 @@ bind r source-file ~/.tmux.conf \; display-message "~/.tmux.conf reloaded"
 # (the default since v2). After adding this, run:
 #   tmux source-file ~/.tmux.conf
 #   tmux list-keys -T root | grep C-z      # verify it's now bound
+#
+# IMPORTANT: tmux's if-shell -F expands #{...} in the *condition*, but
+# split-window's shell-command argument is passed literally (no format
+# substitution). So we cannot put #{session_name}/#{window_name} in the
+# docker exec line directly — they'd reach docker unexpanded and exit 1.
+# tmux-worker-shell.sh resolves them at run time via `tmux display-message
+# -p -t "$TMUX_PANE"`, which does expand formats.
+#
+# Adjust the absolute path below to where you cloned llm-swarm-runner.
 bind-key -n C-z if-shell -F '#{m:iss-*,#{window_name}}' \
-    'split-window -h "docker exec -it swarm-#{session_name}-#{window_name} bash -l"' \
+    'split-window -h "/opt/work/sysadmin/llm-swarm-runner/scripts/tmux-worker-shell.sh"' \
     'send-keys C-z'
+
+# === Session persistence (tmux-resurrect + tmux-continuum) =================
+# Survives tmux server restarts (intentional or crash). Without this, a
+# killed tmux server loses every worker REPL, the coordinator state, and
+# the entire window layout — mid-sprint, that's painful. With it:
+#
+#   • Layout (sessions, windows, panes, splits, working dirs) is saved.
+#   • Pane contents (scrollback) are captured so post-mortem reads still work.
+#   • Listed processes are *relaunched* on restore (claude/codex/gemini etc.).
+#     Note this restarts the agent fresh — it does NOT restore the agent's
+#     prior conversation state. Use claude's /resume or the coordinator's
+#     own on-disk state (.swarm/) for that.
+#
+# One-time setup (TPM = Tmux Plugin Manager):
+#   git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
+#   tmux source-file ~/.tmux.conf
+#   <prefix>+I        # install plugins
+#
+# Manual save:    <prefix>+Ctrl-s
+# Manual restore: <prefix>+Ctrl-r
+# Auto-save runs every @continuum-save-interval minutes; auto-restore fires
+# when the tmux server starts and finds a saved state.
+
+set -g @plugin 'tmux-plugins/tpm'
+set -g @plugin 'tmux-plugins/tmux-resurrect'
+set -g @plugin 'tmux-plugins/tmux-continuum'
+
+# Capture pane scrollback so a restored window shows the same contents
+# (not just a re-launched shell at an empty prompt).
+set -g @resurrect-capture-pane-contents 'on'
+
+# Programs to RELAUNCH on restore. Default list is conservative (vi, vim,
+# nvim, emacs, man, less, more, tail, top, htop, irssi, weechat, mutt).
+# Adding the swarm agents here makes the coordinator + worker windows
+# come back as running processes instead of empty shells.
+set -g @resurrect-processes 'btop htop mc vim nvim claude codex gemini'
+
+# Continuum: auto-save every N minutes; auto-restore on tmux start.
+set -g @continuum-restore 'on'
+set -g @continuum-save-interval '15'
+
+# Initialize TPM — MUST be the last line of this file.
+run '~/.tmux/plugins/tpm/tpm'

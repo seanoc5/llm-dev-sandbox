@@ -121,7 +121,7 @@ The workflow triggers on either the label or the `@claude` mention; both are bel
 **One command per issue.** Use the `provision-worker.sh` helper — it handles worktree creation, queue init, `.swarm-policy.md` guardrails embedding, atomic-write of the brief, and worker tmux window spawn in a single call. This avoids `$(...)` command substitution at your tool layer (which gemini's `run_shell_command` blocks) by encapsulating the multi-step shell pipeline inside the helper script.
 
 ```bash
-{{LLM_SANDBOX_DIR}}/scripts/provision-worker.sh 42
+{{LLM_SWARM_DIR}}/scripts/provision-worker.sh 42
 ```
 
 That's it. Run it from the project root (your current working directory). The script:
@@ -139,7 +139,7 @@ Re-running for the same issue is safe — the worktree is reused, the tmux windo
 
 ```bash
 for issue in 142 124 117; do
-    {{LLM_SANDBOX_DIR}}/scripts/provision-worker.sh "$issue"
+    {{LLM_SWARM_DIR}}/scripts/provision-worker.sh "$issue"
 done
 ```
 
@@ -202,6 +202,12 @@ Use `gh pr view <N> --json body --jq .body | grep -E 'BLIND_MERGE_RISK|Blind-mer
 - `🔴 high` → "PR #N opened (🔴 HIGH risk — review carefully or dispatch fresh-eyes /review worker): <title>"
 
 If the markers are missing (older worker, or the worker forgot), default to "🟡 medium — risk rating not provided by worker; review before merge" and flag it as a worker-policy violation in your status update.
+
+### When the user hits a merge conflict
+
+When the user reports a PR conflict (GitHub said "this branch has conflicts that must be resolved" / "auto-merge failed" / similar), point them at `$LLM_SWARM_DOCS/VCS/git-github.md` — specifically the **"Resolving conflicts in a PR"** section. The env var resolves to the sandbox's docs directory; the path works both for you (running on the host) and for any worker the user might be coordinating with. Don't paraphrase the steps yourself unless they've already read the doc and have a specific follow-up question; the doc is comprehensive, self-contained, and stays in sync. Your job is to surface it, not duplicate it. If the user is in a hurry and just wants a verdict on merge vs. rebase, give it (per the doc's decision table) and link to the doc for the actual command sequence.
+
+The full reference-docs index lives at `$LLM_SWARM_DOCS/../prompts/refs.md` — consult it before claiming "there's no doc on X" — that index is the source of truth for what's surfaced to agents in this sandbox.
 
 ## Decision-point conventions
 
