@@ -106,6 +106,38 @@ EXTRA_MOUNTS="/opt/data:/mnt/data:ro" ./sandbox.sh /path/to/project
 EXTRA_MOUNTS="/opt/data:ro,/opt/models:/models:ro" ./sandbox.sh /path/to/project
 ```
 
+#### Persistent mounts for swarm workers
+
+The form above sets `EXTRA_MOUNTS` for one ad-hoc `sandbox.sh` invocation. For the swarm-coordinator flow — where `provision-worker.sh` spawns containers automatically — declare mounts in `<project>/.swarm/.env` so every worker spawn picks them up:
+
+```bash
+# /opt/work/myproject/.swarm/.env  — gitignored
+EXTRA_MOUNTS=/opt/data/reference:ro,/opt/work/myorg/sibling-repo:ro
+```
+
+`scripts/_load-env.sh` reads this file (precedence: shell env > `<project>/.swarm/.env` > sandbox `.env.example`) and `provision-worker.sh` injects the value as a prefix on the `tmux new-window` command that starts the worker listener, so the listener's `sandbox.sh` sees it. `${FAND_DATA_ROOT}` (and any other env var resolved earlier in the chain) is expanded via envsubst before docker sees the spec — see `scripts/_load-env.sh:55-72`.
+
+**Common pattern: cross-project siblings.** When several related repos live under one org dir (e.g. `/opt/work/myorg/{app,guide,poc}`), give each project's workers read-only access to its siblings so they can cross-reference code, ADRs, and docs:
+
+```bash
+# /opt/work/myorg/app/.swarm/.env
+EXTRA_MOUNTS=/opt/work/myorg/guide:ro,/opt/work/myorg/poc:ro
+```
+
+Use the same host:container path on both sides (the implicit default when you omit the container side) so absolute paths in code resolve identically inside and outside the container.
+
+**Mounts apply only to newly-spawned workers.** In-flight `iss-*` containers were started with whatever `EXTRA_MOUNTS` was set when *they* spawned — they don't see edits to `.swarm/.env` after the fact. To pick up changes: `tmux kill-window -t llm-<project>:iss-N`, then re-provision the issue. Restarting the whole coordinator session (`tmux kill-session -t llm-<project>` then a fresh `llm-start.sh`) is the heavier-hammer equivalent.
+
+**Verify mounts landed.** After a worker spawns, inspect the running container:
+
+```bash
+docker inspect swarm-llm-<project>-iss-<N> \
+    --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' \
+    | grep -v ' -> /home\| -> /var/run'
+```
+
+The non-`/home`-or-docker-socket lines should be exactly the host paths you put in `EXTRA_MOUNTS`. If a path is missing, the propagation broke somewhere between `.swarm/.env` and the `docker run` invocation — check `tmux show-env -t llm-<project> -g EXTRA_MOUNTS` to see what the tmux session has, and `tmux capture-pane -t llm-<project>:iss-<N> -pS -100` to see what the listener invocation looked like.
+
 ## Docker Integrations
 
 ### Testcontainers / Docker CLI
