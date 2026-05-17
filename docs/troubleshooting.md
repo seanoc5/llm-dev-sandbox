@@ -4,6 +4,21 @@ Common issues and their resolutions. If you hit something not covered here, plea
 
 > **Tip:** for general tmux usage (attach/detach, multi-client handling, capturing pane scrollback for diagnosis, killing dead panes), see [`tmux-cheatsheet.md`](./tmux-cheatsheet.md). Many of the diagnostic commands referenced below assume familiarity with `tmux capture-pane -p -S -N` and `tmux list-windows`.
 
+## Quick fixes
+
+The most-common first-encounter issues. Each row links to the full entry below.
+
+| Symptom | Quick fix | Details |
+|---|---|---|
+| `gh: HTTP 401` inside the sandbox | Verify `gh auth status` works on the host; if so, rebuild the image — older entrypoints didn't forward the token | [gh: HTTP 401](#gh-http-401) |
+| `permission denied` on `/var/run/docker.sock` | `sudo usermod -aG docker $USER`, then log out + back in (or `newgrp docker`) | [permission denied on /var/run/docker.sock](#permission-denied-on-varrundockersock) |
+| Claude coordinator burning API credits unexpectedly | Launch via `llm-start.sh` (it strips `ANTHROPIC_API_KEY`), or run `env -u ANTHROPIC_API_KEY claude ...` | [Coordinator picks the wrong billing path](#coordinator-picks-the-wrong-billing-path) |
+| Worker isn't picking up briefs | Start a listener: `tmux new-window -d -t llm-<projbase> -n iss-N "$LLM_SWARM_DIR/sandbox.sh /path/to/worktree listener"` | [Worker isn't picking up briefs](#worker-isnt-picking-up-briefs) |
+| Task stuck in `<wt>/.swarm/tasks/processing/` | `mv <wt>/.swarm/tasks/processing/<id>.md <wt>/.swarm/tasks/inbox/` to re-queue it for a fresh listener | [Tasks stuck in `processing/`](#tasks-stuck-in-processing) |
+| Claude suspended after Ctrl-Z in a worker window | `docker exec swarm-<session>-iss-N bash -c 'pkill -CONT -f claude'`, then load the tmux Ctrl-Z binding so it doesn't recur | [Ctrl-Z accidentally suspended claude inside a worker](#ctrl-z-accidentally-suspended-claude-inside-a-worker) |
+
+---
+
 ## Contents
 
 - [Auth & Plan Availability](#auth--plan-availability)
