@@ -34,6 +34,9 @@ FLAGS
     -a, --all               Include active windows (claude still running).
                             PR-check + idle-min still apply unless overridden.
         --no-pr-check       Skip 'gh pr view fix/issue-N' check (avoid network)
+        --merged-only       STRICT: only reap when PR state is MERGED.
+                            Safe combo with --with-worktree — guarantees no
+                            unmerged work is destroyed. Used by the watcher.
     -i, --idle-min N        Require N+ minutes since last pane activity
                             (default 0 — any parked window is eligible)
     -w, --with-worktree     Also remove git worktree + delete branch
@@ -52,6 +55,7 @@ EXAMPLES
     kill-finished-workers.sh --with-worktree          # parked + worktrees
     kill-finished-workers.sh --all --with-worktree    # full nuke (prompts)
     kill-finished-workers.sh --all --with-worktree -y # full nuke, no prompt
+    kill-finished-workers.sh --merged-only --with-worktree -y  # safe auto-reap
 
 EXIT
     0    success (or nothing to do)
@@ -64,6 +68,7 @@ WITH_WT=0
 DRY=0
 YES=0
 PR_CHECK=1
+MERGED_ONLY=0
 IDLE_MIN=0
 SESSION_NAME="${SESSION_NAME:-llm-$(basename "$PWD")}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -85,6 +90,7 @@ while [[ $# -gt 0 ]]; do
         -n|--dry-run)         DRY=1; shift ;;
         -y|--yes)             YES=1; shift ;;
         --no-pr-check)        PR_CHECK=0; shift ;;
+        --merged-only)        MERGED_ONLY=1; shift ;;
         -i|--idle-min)        require_value "$1" "${2:-}"; IDLE_MIN="$2"; shift 2 ;;
         --idle-min=*)         IDLE_MIN="${1#*=}"; shift ;;
         -s|--session)         require_value "$1" "${2:-}"; SESSION_NAME="$2"; shift 2 ;;
@@ -168,6 +174,16 @@ has_open_pr() {
     [ "$state" = "OPEN" ]
 }
 
+# Returns 0 if the PR for fix/issue-N is MERGED (strict). Returns 1 for
+# OPEN, CLOSED-without-merge, or no PR at all. Used by --merged-only mode
+# so we never reap a worktree whose work hasn't been preserved upstream.
+pr_is_merged() {
+    local issue="$1"
+    local state
+    state=$(gh pr view "fix/issue-$issue" --json state -q .state 2>/dev/null || true)
+    [ "$state" = "MERGED" ]
+}
+
 # Decide which ones to kill ---------------------------------------------------
 KILL_LIST=()
 for w in "${WINDOWS[@]}"; do
@@ -196,7 +212,13 @@ for w in "${WINDOWS[@]}"; do
     fi
 
     # PR check (applied in both modes when enabled)
-    if [ "$PR_CHECK" = "1" ]; then
+    if [ "$MERGED_ONLY" = "1" ]; then
+        if ! pr_is_merged "$issue"; then
+            echo "  $w  [PR fix/issue-$issue not MERGED → skip (merged-only mode)]"
+            continue
+        fi
+        reasons+=("PR-merged")
+    elif [ "$PR_CHECK" = "1" ]; then
         if has_open_pr "$issue"; then
             echo "  $w  [PR fix/issue-$issue still OPEN → skip (use --no-pr-check to override)]"
             continue

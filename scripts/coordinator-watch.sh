@@ -33,6 +33,15 @@
 #                           are coalesced. Honors $OUTCOME_HOOK; falls
 #                           back to dry-run stub if unset.
 #   SWEEP=<path>            Override path to sweep-swarm-outcomes.sh.
+#   WATCHER_AUTOCLOSE=1     Set to 0 to disable automatic cleanup of
+#                           merged workers before each coord.wake. When
+#                           enabled (default), invokes
+#                             kill-finished-workers.sh --merged-only \
+#                                 --with-worktree --yes
+#                           so PR-merged workers fully reap (window +
+#                           worktree + local branch) and free their slot.
+#                           Strict: only fires when PR state is MERGED, so
+#                           OPEN / CLOSED / no-PR cases stay untouched.
 #
 # Watch backend (auto-detected):
 #   - inotifywait (preferred): instant response. Install with:
@@ -71,6 +80,7 @@ CONFIG  (precedence: shell env > <project>/.swarm/.env > <sandbox>/.env.example)
     POST_OUTCOMES       0         run sweep-swarm-outcomes.sh per outcome
     OUTCOME_HOOK        (none)    path to per-outcome poster
     SWEEP               (auto)    override sweep-swarm-outcomes.sh path
+    WATCHER_AUTOCLOSE   1         reap merged workers (window+worktree+branch) before wake
     WORKSPACE           (auto)    parent dir for wt-issue-* worktrees
     MAX_WORKERS         2         (referenced by default WAKE_PROMPT)
     MAX_TMUX_WINDOWS    10        (referenced by default WAKE_PROMPT)
@@ -82,11 +92,12 @@ DEFAULT WAKE_PROMPT (top-up mode)
 
 EVENTS LOG
     Appends to <project>/.swarm/events.log:
-      watch.start    boot banner with backend + caps
-      worker.finish  outcome JSON detected (issue, ok|err)
-      coord.wake     llm-start.sh invoked (or coord.wake.skip on debounce)
-      sweep.run      sweep-swarm-outcomes.sh fired (when POST_OUTCOMES=1)
-      cap.refused    provision-worker.sh hit MAX_WORKERS / MAX_TMUX_WINDOWS
+      watch.start      boot banner with backend + caps
+      worker.finish    outcome JSON detected (issue, ok|err)
+      coord.wake       llm-start.sh invoked (or coord.wake.skip on debounce)
+      sweep.run        sweep-swarm-outcomes.sh fired (when POST_OUTCOMES=1)
+      watch.autoclose  kill-finished-workers.sh invoked (when WATCHER_AUTOCLOSE=1)
+      cap.refused      provision-worker.sh hit MAX_WORKERS / MAX_TMUX_WINDOWS
 
 BACKEND
     Auto-detects inotifywait (instant) or falls back to polling find
@@ -131,6 +142,8 @@ WAKE_PROMPT="${WAKE_PROMPT:-Worker(s) just finished. Triage their outcome JSONs 
 POLL_SECS="${POLL_SECS:-2}"
 POST_OUTCOMES="${POST_OUTCOMES:-0}"
 SWEEP="${SWEEP:-$LLM_SWARM_DIR/scripts/sweep-swarm-outcomes.sh}"
+WATCHER_AUTOCLOSE="${WATCHER_AUTOCLOSE:-1}"
+KILL_FINISHED="${KILL_FINISHED:-$LLM_SWARM_DIR/scripts/kill-finished-workers.sh}"
 
 # Append-only structured event log. Every observable event (start, outcome,
 # wake, sweep, cap-refusal) gets a single line so `tail -F` gives live status.
@@ -154,6 +167,11 @@ log_event() {
 if [ "$POST_OUTCOMES" = "1" ]; then
     [ -x "$SWEEP" ] || { echo "ERROR: sweep script not executable: $SWEEP" >&2; exit 1; }
 fi
+if [ "$WATCHER_AUTOCLOSE" = "1" ] && [ ! -x "$KILL_FINISHED" ]; then
+    echo "WARN: WATCHER_AUTOCLOSE=1 but kill-finished-workers.sh not executable: $KILL_FINISHED" >&2
+    echo "      Disabling autoclose; set WATCHER_AUTOCLOSE=0 to silence this." >&2
+    WATCHER_AUTOCLOSE=0
+fi
 
 # Pick a backend
 BACKEND="poll"
@@ -171,6 +189,7 @@ debounce:      ${DEBOUNCE_SECS}s
 poll interval: ${POLL_SECS}s$([ "$BACKEND" = "inotify" ] && echo " (unused in inotify mode)")
 llm-start.sh:  $LLM_START
 post-outcomes: $POST_OUTCOMES$([ "$POST_OUTCOMES" = "1" ] && echo " (sweep: $SWEEP, hook: ${OUTCOME_HOOK:-default dry-run stub})")
+autoclose:     $WATCHER_AUTOCLOSE$([ "$WATCHER_AUTOCLOSE" = "1" ] && echo " (script: $KILL_FINISHED)")
 dry-run:       $DRY_RUN
 once:          $ONCE
 
@@ -184,6 +203,35 @@ log_event watch.start \
 
 # Shared state
 LAST_WAKE=0
+
+# cleanup_eligible_workers
+#
+# Full reap of workers whose PR has been MERGED upstream — kills the tmux
+# window, removes the worktree, deletes the local branch. Called inside
+# on_outcome (after debounce passes, before coord.wake) so freed slots
+# show up in the coordinator's window/alive count on its next wake.
+#
+# Uses --merged-only + --with-worktree so the destructive part only fires
+# for work that is already preserved in the merged commit. PRs in OPEN,
+# CLOSED-without-merge, or "no PR" states are left untouched — the user
+# can review them manually before deciding what to do.
+#
+# This is the smooth-flow contract: user merges PR -> watcher reaps
+# everything -> slot fully free for the next dispatch. No manual scripts.
+#
+# Failures are non-fatal — the watcher's job is wake the coordinator, and
+# the coordinator can still report cap-reached if cleanup didn't fire.
+cleanup_eligible_workers() {
+    local dry_arg=""
+    [ "$DRY_RUN" = "1" ] && dry_arg="--dry-run"
+
+    # We deliberately discard stdout/stderr — kill-finished-workers.sh has
+    # its own verbose output; we only care about the side effect (windows
+    # + worktrees + branches reaped). The autoclose event in our log
+    # records that we ran.
+    "$KILL_FINISHED" --idle-min 0 --merged-only --with-worktree --yes $dry_arg >/dev/null 2>&1 || true
+    log_event watch.autoclose "trigger=outcome mode=merged-only+worktree dry_run=$DRY_RUN"
+}
 
 # Trigger logic — called when a NEW outcome JSON path is observed
 on_outcome() {
@@ -222,6 +270,14 @@ on_outcome() {
         echo "[$(date +%T)] outcome: $path — within debounce window (${DEBOUNCE_SECS}s), skipping wake"
         log_event coord.wake.skip "issue=$issue reason=debounce window=${DEBOUNCE_SECS}s"
         return
+    fi
+
+    # Free slots from parked + PR-safe workers (PRs merged/closed) before
+    # the coordinator wakes — otherwise its slot computation sees stale
+    # alive-worker counts and reports cap-reached when wave 2 should fire.
+    if [ "$WATCHER_AUTOCLOSE" = "1" ]; then
+        echo "[$(date +%T)] running autoclose pass before wake..."
+        cleanup_eligible_workers
     fi
 
     echo "[$(date +%T)] outcome: $path"
@@ -278,9 +334,12 @@ run_inotify() {
 run_poll() {
     # Build a baseline of currently-known outcome JSONs so we don't fire
     # for anything that existed before the watcher started.
-    local seen_file
+    # NOTE: seen_file is intentionally script-global (no `local`) so the
+    # EXIT/INT/TERM trap can reach it even if a signal arrives outside of
+    # run_poll's stack frame. The :- guard handles the early-shutdown case
+    # where the signal fires before mktemp ran.
     seen_file=$(mktemp -t coord-watch-seen-XXXXXX)
-    trap 'rm -f "$seen_file"' EXIT INT TERM
+    trap '[ -n "${seen_file:-}" ] && rm -f -- "$seen_file"' EXIT INT TERM
 
     # Scan only wt-issue-*/.swarm/tasks/done dirs under WORKSPACE. The glob
     # may expand to nothing if no worker worktrees exist yet — handle that
