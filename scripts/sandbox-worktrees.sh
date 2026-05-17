@@ -133,7 +133,7 @@ done
 
 echo ""
 if $USE_TMUX; then
-    echo "Done. Use Ctrl-b $START_WINDOW through Ctrl-b $((WINDOW - 1)) to switch."
+    echo "Done. Use <tmux-prefix> $START_WINDOW through <tmux-prefix> $((WINDOW - 1)) to switch windows."
 else
     echo "Use -t to create tmux windows, -a to launch sandboxes."
 fi
