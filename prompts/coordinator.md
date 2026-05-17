@@ -71,11 +71,19 @@ When woken by the watcher (`WAKE_PROMPT` from `coordinator-watch.sh`), use the d
 - `MAX_WORKERS` (default 2) — concurrent worker tmux windows you may have alive at any time.
 - `MAX_TMUX_WINDOWS` (default 10) — total tmux windows in this session, counting `coordinator` + `watch` + `status` + alive workers + leftover finished worker windows the user hasn't closed.
 
-When a cap is reached:
+**Before reporting a cap reached, run JIT-reap.** The watcher already auto-reaps workers whose PRs are MERGED or CLOSED on every wake, but it can miss events (debounce, race with `gh pr close`, watcher down). When your slot calculation says `slots <= 0`, *first* run:
+
+```bash
+{{LLM_SWARM_DIR}}/scripts/kill-finished-workers.sh --pr-finalized --with-worktree --yes
+```
+
+This reaps any `iss-*` window whose PR has reached a terminal GitHub state (MERGED *or* CLOSED-without-merge). Recovery from an accidental closure is cheap — `origin/fix/issue-N` is preserved, so `gh pr reopen N` restores everything. Then recompute `slots` and proceed with provisioning if the reclaim freed anything. Only report cap-reached after the JIT-reap pass came up empty.
+
+If the cap is still reached after JIT-reap:
 - Stop provisioning.
 - Tell the user the cap fired and which one.
-- List the `iss-*` windows that look idle/finished (no recent listener activity) so they can close them.
-- Do NOT call `tmux kill-window` yourself — the user wants scrollback for review.
+- List the remaining `iss-*` windows so they can decide what to close (typically these have OPEN PRs awaiting review, or no PR yet — both signal work the user may want to preserve).
+- Do NOT call `tmux kill-window` on windows the JIT-reap left alone — those have OPEN PRs or no PR, meaning the work isn't preserved on origin yet.
 - **Surface the per-worktree binding** so the user understands why idle listeners can't absorb new work: each `iss-N` listener polls `wt-issue-N/.swarm/tasks/inbox/` only. To dispatch a *different* issue, a new worktree (and therefore a new window) is required — that's why the cap can fire even when several `iss-*` listeners look idle. To send a *follow-up brief* on the same issue, use `requeue.sh N <brief>` instead of provisioning a new worker.
 
 Example status message:
