@@ -181,6 +181,8 @@ ss -tlnp | grep <port>
 
 ## Git & SSH
 
+> **Tip:** for general git skills relevant to swarm work — resolving merge conflicts in worker PRs, recovery recipes, when to merge vs. rebase — see [`VCS/git-github.md`](./VCS/git-github.md). The entries below are about plumbing failures (signing, mounts, auth); the VCS doc is about *using* git well.
+
 ### `git commit` fails with signing error
 Verify `~/.ssh/id_rsa.pub` (or whatever `user.signingkey` points to) exists on the host. The path must be the literal value in `.gitconfig` — the container mounts `~/.ssh` at that exact path.
 

@@ -79,6 +79,16 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 MOUNTS+=( "-v" "$SCRIPT_DIR:$SCRIPT_DIR:ro" )
 
+# Expose the sandbox install path and the docs subtree to the worker as env
+# vars. The sandbox repo is already bind-mounted ro above (same path in
+# container as on host), so $LLM_SANDBOX_DOCS resolves to a real directory
+# inside the container. Workers use it to locate the reference-docs index
+# (prompts/refs.md) and the docs themselves (e.g. docs/VCS/git-github.md).
+SANDBOX_DOCS_ENV_OPTS=(
+    -e "LLM_SANDBOX_DIR=$SCRIPT_DIR"
+    -e "LLM_SANDBOX_DOCS=$SCRIPT_DIR/docs"
+)
+
 # Allow for additional mounts via environment variable
 if [ -n "${EXTRA_MOUNTS:-}" ]; then
     IFS=',' read -ra ADDR <<< "$EXTRA_MOUNTS"
@@ -240,8 +250,10 @@ exec docker run "${INTERACTIVE_FLAGS[@]}" --rm --init \
     "${DOCKER_SOCK_OPTS[@]}" \
     "${SSH_OPTS[@]}" \
     "${WORKER_ENV_OPTS[@]}" \
+    "${SANDBOX_DOCS_ENV_OPTS[@]}" \
     "${MOUNTS[@]}" \
     -e "TERM=$TERM" \
     -e "COLORTERM=${COLORTERM:-}" \
+    -e "BROWSER=echo" \
     "$IMAGE" \
     "${CMD_ARRAY[@]}"

@@ -203,6 +203,12 @@ Use `gh pr view <N> --json body --jq .body | grep -E 'BLIND_MERGE_RISK|Blind-mer
 
 If the markers are missing (older worker, or the worker forgot), default to "🟡 medium — risk rating not provided by worker; review before merge" and flag it as a worker-policy violation in your status update.
 
+### When the user hits a merge conflict
+
+When the user reports a PR conflict (GitHub said "this branch has conflicts that must be resolved" / "auto-merge failed" / similar), point them at `$LLM_SANDBOX_DOCS/VCS/git-github.md` — specifically the **"Resolving conflicts in a PR"** section. The env var resolves to the sandbox's docs directory; the path works both for you (running on the host) and for any worker the user might be coordinating with. Don't paraphrase the steps yourself unless they've already read the doc and have a specific follow-up question; the doc is comprehensive, self-contained, and stays in sync. Your job is to surface it, not duplicate it. If the user is in a hurry and just wants a verdict on merge vs. rebase, give it (per the doc's decision table) and link to the doc for the actual command sequence.
+
+The full reference-docs index lives at `$LLM_SANDBOX_DOCS/../prompts/refs.md` — consult it before claiming "there's no doc on X" — that index is the source of truth for what's surfaced to agents in this sandbox.
+
 ## Decision-point conventions
 
 **At every decision you surface to the user, follow the SME-to-PO pattern.** You and your workers are the SMEs; the user is the product owner. They lean on you for relevant info and a recommendation, then they decide.

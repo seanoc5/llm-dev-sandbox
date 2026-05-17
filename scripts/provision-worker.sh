@@ -129,6 +129,12 @@ export WORKER_VERBOSITY
 # Lives in the sandbox repo; copied verbatim to the top of every worker brief.
 WORKER_BASE_MD="$LLM_SANDBOX_DIR/prompts/worker-base.md"
 
+# Reference-docs index. Cat'd into every brief after worker-base.md so workers
+# know what authoritative docs are available under $LLM_SANDBOX_DOCS/ inside
+# their container. The docs themselves are reachable via the sandbox-dir
+# bind mount in sandbox.sh.
+WORKER_REFS_MD="$LLM_SANDBOX_DIR/prompts/refs.md"
+
 # Append-only structured event log. Same format as coordinator-watch.sh.
 EVENTS_LOG="$PROJECT_DIR/.swarm/events.log"
 mkdir -p "$(dirname "$EVENTS_LOG")" 2>/dev/null || true
@@ -192,6 +198,15 @@ TMP="$(mktemp -p "$WT/.swarm/tasks/inbox" .tmp.XXXXXX.md)"
     #    constraints like "always emit a summary, NBA hint, and PR risk rating").
     if [ -f "$WORKER_BASE_MD" ]; then
         cat "$WORKER_BASE_MD"
+        echo
+        echo "---"
+        echo
+    fi
+    # 1b. Reference-docs index: tells the worker what authoritative docs live
+    #     under $LLM_SANDBOX_DOCS/ (mounted ro into the container) and when to
+    #     consult them. Index is small; the doc bodies stay on disk until needed.
+    if [ -f "$WORKER_REFS_MD" ]; then
+        cat "$WORKER_REFS_MD"
         echo
         echo "---"
         echo
@@ -271,7 +286,7 @@ else
     #   swarm-<session>-iss-<issue>
     container_name="swarm-${SESSION_NAME}-iss-${ISSUE}"
     tmux new-window -d -t "$SESSION_NAME" -n "iss-$ISSUE" \
-        "WORKER_CONTAINER_NAME=$container_name WORKER_VERBOSITY=$WORKER_VERBOSITY $SANDBOX_SH $WT listener"
+        "WORKER_CONTAINER_NAME=$container_name WORKER_VERBOSITY=$WORKER_VERBOSITY EXTRA_MOUNTS='${EXTRA_MOUNTS:-}' $SANDBOX_SH $WT listener"
     echo "[4/4] tmux window iss-$ISSUE spawned (listener)"
     log_event worker.start "issue=$ISSUE task_id=$TASK_ID window=iss-$ISSUE alive=$((alive_workers + 1))/$MAX_WORKERS total_windows=$((total_windows + 1))/$MAX_TMUX_WINDOWS"
 fi

@@ -31,6 +31,7 @@ For deep-dives into specific topics, please refer to the reference documentation
 - 🛡️ [**Security Considerations**](./docs/security.md) - Understand the blast radius and the risks of `--yolo` / Docker-out-of-Docker.
 - 🚑 [**Troubleshooting**](./docs/troubleshooting.md) - Fix common SSH, `gh` auth, and networking errors.
 - 🪟 [**tmux Cheatsheet**](./docs/tmux-cheatsheet.md) - Attach/detach, multi-client handling, capture-pane for diagnostics, and other commands you'll actually use with the swarm.
+- 🌿 [**Git & GitHub Tips**](./docs/VCS/git-github.md) - Crib sheet for swarm-flavored git/`gh`: resolving conflicts when merging worker PRs, recovery recipes, pointers to authoritative references (ohshitgit, Pro Git, etc.). Aimed at users whose git skills are thinner than their swarm-orchestration skills.
 
 ---
 

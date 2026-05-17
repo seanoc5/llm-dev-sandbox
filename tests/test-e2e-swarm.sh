@@ -58,9 +58,12 @@ EOF
 yellow "Launching Coordinator with E2E test prompt..."
 # Launch using our refactored llm-start.sh, passing the custom prompt.
 # WORKER_HEADLESS=1 forces workers to use claude -p (skips trust dialog and
-# the new interactive REPL) since there's no human attached to answer.
+# the interactive REPL) since there's no human attached to answer.
+# COORDINATOR_HEADLESS=1 does the same for the coordinator, which is now
+# interactive-REPL by default.
 export NON_INTERACTIVE=1
 export WORKER_HEADLESS=1
+export COORDINATOR_HEADLESS=1
 "$SCRIPT_DIR/../llm-start.sh" "$TEST_PROMPT"
 
 echo ""
